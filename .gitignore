@@ -1,3 +1,20 @@
 _last-audit.md
+_last-review.md
+_last-diagnose.md
 _audit-pending
 _audit.log
+_pocketdev.log
+__pycache__/
+*.pyc
+venv/
+.venv/
+.env
+*.log
+dist/
+build/
+*.egg-info/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini

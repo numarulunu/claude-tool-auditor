@@ -1,67 +1,76 @@
-# Claude Tool Auditor
+# pocketDEV
 
-Portable automated health checker for all your git-tracked projects. Scans your machine for git repos, checks for common issues, and generates a plain-language report that Claude can process.
+Senior developer on call. Audits, reviews, and diagnoses your git-tracked projects.
 
-## What it checks
+## Modes
 
-For every git repo it finds:
-- Does it have uncommitted changes? Unpushed commits?
-- Does it have a .gitignore? A README?
-- Are there large files that shouldn't be tracked?
-- Is it stale (no changes in 30+ days)?
-- Does it have a remote (backed up somewhere)?
-- Does it have tests? What framework?
+| Mode | What it does |
+|---|---|
+| `audit` | Health scan across all repos — missing .gitignore, large files, stale code, no tests, uncommitted work |
+| `review <tool>` | Deep code quality dive — complexity hotspots, TODOs, secrets, dependency health, test coverage |
+| `diagnose <tool>` | Broken tool triage — runs tests, checks recent changes, reads logs, verifies dependencies |
 
 ## Requirements
 
 - Python 3.10+
 - Git
 
-## Quick Start
+## Usage
 
 ```bash
-# Clone
-git clone https://github.com/YOUR_USERNAME/claude-tool-auditor.git
-cd claude-tool-auditor
+# Audit everything
+python pocketdev.py audit
 
-# Audit everything on your Desktop and Documents
-python audit.py
+# Audit one tool
+python pocketdev.py audit --tool "Finance"
 
-# Audit a specific directory
-python audit.py --scan-dir ~/Projects
+# Deep review
+python pocketdev.py review "Finance"
 
-# Audit repos matching a name
-python audit.py --tool "finance"
+# Diagnose a broken tool
+python pocketdev.py diagnose "Transcriptor"
+
+# Custom scan directory
+python pocketdev.py --scan-dir ~/Projects audit
 
 # Save report to file
-python audit.py --output report.md
+python pocketdev.py audit --output report.md
 ```
 
-## Scheduling (Weekly)
+## Shell Wrapper
+
+```bash
+./run-pocketdev.sh audit                    # Audit all
+./run-pocketdev.sh audit "Finance"          # Audit one
+./run-pocketdev.sh review "Finance"         # Deep review
+./run-pocketdev.sh diagnose "Transcriptor"  # Diagnose
+```
+
+## Scheduling (Weekly Audit)
 
 ### Windows
 ```powershell
-$action = New-ScheduledTaskAction -Execute 'C:\Program Files\Git\usr\bin\bash.exe' -Argument '"PATH\TO\run-audit.sh"'
+$action = New-ScheduledTaskAction -Execute 'C:\Program Files\Git\usr\bin\bash.exe' -Argument '"C:\path\to\run-pocketdev.sh" audit'
 $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At '8:00PM'
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun
-Register-ScheduledTask -TaskName 'Claude Tool Audit' -Action $action -Trigger $trigger -Settings $settings
+Register-ScheduledTask -TaskName 'pocketDEV Audit' -Action $action -Trigger $trigger -Settings $settings
 ```
 
 ### Linux/macOS
 ```bash
-crontab -e
-0 20 * * 0 /path/to/run-audit.sh >> /path/to/audit.log 2>&1
+0 20 * * 0 /path/to/run-pocketdev.sh audit >> /path/to/pocketdev.log 2>&1
 ```
 
 ## Integration with Claude Code
 
-The auditor writes a `_audit-pending` flag when it completes. If you have a Claude Code SessionStart hook checking for this flag, Claude will notify you that an audit is ready for review.
+pocketDEV writes a `_audit-pending` flag after each audit. A Claude Code SessionStart hook checks for this flag and prompts you to review results.
 
-When you say "review audit", Claude reads the report and proposes fixes in plain language — explaining what each issue means and what to do about it, with no jargon.
+When you say "review audit", Claude reads the report as pocketDEV — a senior developer presenting findings with concrete fixes, effort estimates, and priorities.
 
 ## Files
 
 | File | What it does |
 |---|---|
-| `audit.py` | Main auditor — discovers repos, checks health, generates report |
-| `run-audit.sh` | Shell wrapper for scheduling |
+| `pocketdev.py` | Main tool — audit, review, diagnose modes |
+| `run-pocketdev.sh` | Shell wrapper for scheduling and manual runs |
+| `CLAUDE.md` | System instructions — tells Claude how to act as pocketDEV |
