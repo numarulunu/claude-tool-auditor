@@ -33,6 +33,9 @@ from collections import Counter
 SKIP_DIRS = {".git", "node_modules", "__pycache__", "venv", ".venv", "dist",
              "build", ".next", ".nuxt", "coverage", ".tox", "egg-info"}
 
+# Repos to skip during discovery (parent/meta repos that aren't standalone tools)
+EXCLUDE_REPOS = {"claude-backup"}
+
 BINARY_EXTS = {".exe", ".dll", ".so", ".dylib", ".lib", ".pyd", ".pyc",
                ".whl", ".tar", ".gz", ".zip", ".7z", ".rar",
                ".mp4", ".m4a", ".mp3", ".wav", ".flac", ".avi", ".mkv",
@@ -113,6 +116,15 @@ def find_git_repos(scan_dirs, max_depth=4):
                     parts = slug.split("/")
                     if len(parts) >= 2:
                         repo_name = parts[-1]
+
+                if repo_name in EXCLUDE_REPOS:
+                    # Skip excluded repos but keep descending for child repos
+                    has_child_repos = any(
+                        (Path(root) / sub / ".git").exists() for sub in dirs
+                    )
+                    if not has_child_repos:
+                        dirs.clear()
+                    continue
 
                 repos.append({
                     "name": repo_path.name,
