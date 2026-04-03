@@ -31,7 +31,8 @@ from collections import Counter
 # ---------------------------------------------------------------------------
 
 SKIP_DIRS = {".git", "node_modules", "__pycache__", "venv", ".venv", "dist",
-             "build", ".next", ".nuxt", "coverage", ".tox", "egg-info"}
+             "build", ".next", ".nuxt", "coverage", ".tox", "egg-info",
+             "_digests", "_conversations"}
 
 # Repos to skip during discovery (parent/meta repos that aren't standalone tools)
 EXCLUDE_REPOS = {"claude-backup"}
