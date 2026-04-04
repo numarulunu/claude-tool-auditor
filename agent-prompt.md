@@ -102,6 +102,19 @@ If you find any of these, write them to `_urgent.md` immediately:
 - Data loss risks
 - Silent failures that corrupt output
 
+### Unreleased Electron changes
+
+For repos with Electron apps (desktop software), check if there are commits since the last GitHub release tag. If so, flag it in the backlog:
+
+```
+### [NEW] Release pending: N commits since vX.Y.Z
+**Impact:** Medium | **Effort:** Quick fix (5 minutes)
+**What:** Run `python pocketdev.py release "ToolName" --bump patch`
+**Why:** N commits with improvements/fixes sitting unreleased. Users won't get them until a release is published.
+```
+
+The release command handles everything: version bump, build, publish to GitHub, auto-update reaches users.
+
 ### Backlog maintenance
 
 - `[NEW]` entries older than 30 days without approval: move to a `## Archived` section and retag as `[STALE]`.

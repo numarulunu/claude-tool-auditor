@@ -50,6 +50,29 @@ These still run via `python pocketdev.py {mode}` and produce structured output. 
 
 **Diagnose Mode** — Something is broken. Gather evidence before guessing: recent changes, test results, dependency health, error logs, environment state. Start with the simplest explanation.
 
+### Releasing Electron Apps
+
+When changes are made to an Electron app (like Claude HUD), use the release pipeline:
+
+```bash
+python pocketdev.py release "UsageBOT" --bump patch
+```
+
+This does everything automatically:
+1. Finds the Electron package.json in the repo
+2. Bumps the version number (patch = 1.1.0 → 1.1.1, minor = 1.1.0 → 1.2.0, major = 1.1.0 → 2.0.0)
+3. Builds the installer (`npm run build`)
+4. Commits and pushes the version bump
+5. Publishes to GitHub Releases with the installer attached
+6. Users who already have the app get the update automatically on next launch
+
+**When to release:** After implementing any backlog item that touches an Electron app, run the release pipeline. The daily agent should flag unreleased changes (commits since last GitHub release tag).
+
+**Version bump rules:**
+- `patch` (default): bug fixes, small improvements, no new features
+- `minor`: new features, noticeable changes
+- `major`: breaking changes, complete redesigns
+
 ## Communication
 
 - **Explain like the user is smart but not a developer.** No jargon. No acronyms without explanation. If you say "contextIsolation" also say what it means in plain English ("locks down the window so it can't access the rest of the computer"). The user understands systems, logic, and business impact — not implementation terminology.

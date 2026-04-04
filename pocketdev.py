@@ -1627,6 +1627,135 @@ def backlog_stats(entries):
 # CLI
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# RELEASE mode — Electron app build + publish pipeline
+# ---------------------------------------------------------------------------
+
+def find_electron_package(repo_dir):
+    """Find the package.json that has electron as a dependency."""
+    d = Path(repo_dir)
+    for pkg_path in d.rglob("package.json"):
+        if "node_modules" in str(pkg_path):
+            continue
+        try:
+            pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
+            all_deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
+            if "electron" in all_deps:
+                return pkg_path
+        except (json.JSONDecodeError, OSError):
+            pass
+    return None
+
+
+def bump_version(version_str, bump_type):
+    """Bump a semver version string. Returns new version."""
+    parts = version_str.split(".")
+    if len(parts) != 3:
+        return version_str
+    major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
+    if bump_type == "major":
+        major += 1; minor = 0; patch = 0
+    elif bump_type == "minor":
+        minor += 1; patch = 0
+    else:
+        patch += 1
+    return f"{major}.{minor}.{patch}"
+
+
+def release_electron(repo, bump_type="patch", notes=None):
+    """Full Electron release pipeline: bump version → build → publish to GitHub."""
+    d = Path(repo["dir"])
+    pkg_path = find_electron_package(repo["dir"])
+
+    if not pkg_path:
+        print(f"[release] ERROR: No Electron package.json found in {repo['name']}", file=sys.stderr)
+        return False
+
+    electron_dir = pkg_path.parent
+    print(f"[release] Electron app found at: {electron_dir}", file=sys.stderr)
+
+    # Step 1: Read current version
+    pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
+    old_version = pkg.get("version", "0.0.0")
+    new_version = bump_version(old_version, bump_type)
+    print(f"[release] Version bump: {old_version} → {new_version} ({bump_type})", file=sys.stderr)
+
+    # Step 2: Update version in package.json
+    pkg["version"] = new_version
+    pkg_path.write_text(json.dumps(pkg, indent=2) + "\n", encoding="utf-8")
+
+    # Step 3: Build the installer
+    print(f"[release] Building installer...", file=sys.stderr)
+    code, stdout, stderr = run_cmd(
+        ["npm", "run", "build"],
+        cwd=str(electron_dir),
+        timeout=600
+    )
+    if code != 0:
+        print(f"[release] ERROR: Build failed:\n{stderr}", file=sys.stderr)
+        return False
+    print(f"[release] Build complete.", file=sys.stderr)
+
+    # Step 4: Find the built artifacts
+    dist_dir = electron_dir / "dist"
+    exe_files = list(dist_dir.glob("*.exe"))
+    blockmap_files = list(dist_dir.glob("*.blockmap"))
+    yml_files = list(dist_dir.glob("latest.yml"))
+
+    installer = None
+    for f in exe_files:
+        if "Setup" in f.name and "uninstaller" not in f.name:
+            installer = f
+            break
+
+    if not installer:
+        print(f"[release] ERROR: No installer .exe found in {dist_dir}", file=sys.stderr)
+        return False
+
+    # Step 5: Generate release notes from git log if not provided
+    if not notes:
+        code, stdout, _ = run_cmd(
+            ["git", "log", "--oneline", f"--since=7 days ago", "--no-merges"],
+            cwd=repo["dir"]
+        )
+        if code == 0 and stdout:
+            commits = stdout.strip().splitlines()[:10]
+            notes = "Changes:\n" + "\n".join(f"- {c.split(' ', 1)[1]}" for c in commits if ' ' in c)
+        else:
+            notes = f"Release v{new_version}"
+
+    # Step 6: Commit the version bump
+    code, _, _ = run_cmd(["git", "add", "-A"], cwd=repo["dir"])
+    code, _, _ = run_cmd(
+        ["git", "commit", "-m", f"release: v{new_version}\n\n{notes}"],
+        cwd=repo["dir"]
+    )
+    code, _, _ = run_cmd(["git", "push"], cwd=repo["dir"])
+
+    # Step 7: Publish to GitHub Releases
+    print(f"[release] Publishing v{new_version} to GitHub...", file=sys.stderr)
+
+    gh_args = ["gh", "release", "create", f"v{new_version}",
+               "--title", f"v{new_version}",
+               "--notes", notes]
+
+    # Attach artifacts
+    gh_args.append(str(installer))
+    for f in blockmap_files:
+        gh_args.append(str(f))
+    for f in yml_files:
+        gh_args.append(str(f))
+
+    code, stdout, stderr = run_cmd(gh_args, cwd=repo["dir"], timeout=120)
+    if code != 0:
+        print(f"[release] ERROR: GitHub release failed:\n{stderr}", file=sys.stderr)
+        return False
+
+    print(f"[release] Published: {stdout}", file=sys.stderr)
+    print(f"[release] Users with the app installed will get this update automatically.", file=sys.stderr)
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="pocketdev",
@@ -1660,6 +1789,14 @@ def main():
     p_snapshot = subparsers.add_parser("snapshot", help="Generate structured JSON for Claude agent")
     p_snapshot.add_argument("--output", type=str, default=None,
                            help="Write snapshot to file (default: stdout)")
+
+    # release
+    p_release = subparsers.add_parser("release", help="Build and publish an Electron app release")
+    p_release.add_argument("tool", type=str, help="Tool name to release")
+    p_release.add_argument("--bump", type=str, choices=["patch", "minor", "major"], default="patch",
+                          help="Version bump type (default: patch)")
+    p_release.add_argument("--notes", type=str, default=None,
+                          help="Release notes (auto-generated from git log if omitted)")
 
     # backlog
     p_backlog = subparsers.add_parser("backlog", help="Manage the improvement backlog")
@@ -1755,6 +1892,23 @@ def main():
     elif args.mode == "snapshot":
         snapshot = snapshot_all(repos)
         report = json.dumps(snapshot, indent=2, default=str)
+
+    # --- RELEASE ---
+    elif args.mode == "release":
+        matched = match_repo(repos, args.tool)
+        if not matched:
+            print(f"[pocketDEV] No repo matching '{args.tool}'.", file=sys.stderr)
+            sys.exit(1)
+        if len(matched) > 1:
+            print(f"[pocketDEV] Multiple matches: {', '.join(r['name'] for r in matched)}",
+                  file=sys.stderr)
+            sys.exit(1)
+
+        repo = matched[0]
+        success = release_electron(repo, bump_type=args.bump, notes=args.notes)
+        if not success:
+            sys.exit(1)
+        sys.exit(0)
 
     # --- Output ---
     if args.output:
