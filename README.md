@@ -2,9 +2,9 @@
 
 # pocketDEV
 
-**Your senior developer on call.**
+**Claude-powered senior developer that maintains your tool portfolio.**
 
-Auto-discovers git repos on your machine. Audits them for real problems. Reports what to fix and why.
+Auto-discovers git repos. Takes daily snapshots. Proposes fixes ranked by blast radius. You approve, it ships.
 
 ![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
 ![License MIT](https://img.shields.io/badge/License-MIT-green)
@@ -17,20 +17,50 @@ Auto-discovers git repos on your machine. Audits them for real problems. Reports
 
 ## How It Works
 
-pocketDEV walks your filesystem, finds every git repo with a remote, and runs a health check on each one. No configuration. No manifest. Point it at a directory and it reports back.
+pocketDEV runs daily as a scheduled task. It snapshots every git repo on your machine, feeds the data to a Claude agent, and produces a prioritized backlog of issues and improvements. You review the backlog, approve what matters, and Claude implements the fixes.
 
 ```mermaid
 flowchart LR
-    A[Scan directories] --> B[Find .git repos]
-    B --> C[Filter by remote]
-    C --> D{Mode?}
-    D -->|audit| E[Health check all repos]
-    D -->|review| F[Deep code review of one repo]
-    D -->|diagnose| G[Triage a broken repo]
-    E --> H[Markdown report]
-    F --> H
-    G --> H
+    A[Scheduled task] --> B[Snapshot all repos]
+    B --> C[Claude agent analyzes]
+    C --> D[Backlog updated]
+    D --> E[You review & approve]
+    E --> F[Claude implements]
+    F --> G[Changelog entry]
 ```
+
+---
+
+## Daily Run Workflow
+
+The core loop that keeps your portfolio healthy:
+
+```mermaid
+sequenceDiagram
+    participant Cron as Scheduled Task
+    participant PD as pocketDEV
+    participant Snap as _snapshot.json
+    participant Agent as Claude Agent
+    participant BL as _backlog.md
+    participant You as Developer
+
+    Cron->>PD: python pocketdev.py audit
+    PD->>Snap: Write repo health data
+    Cron->>Agent: claude agent-prompt.md + snapshot
+    Agent->>BL: Append prioritized issues
+    Note over You: Next session starts
+    You->>BL: Review backlog
+    You->>Agent: Approve items
+    Agent->>Agent: Implement fixes
+    Agent->>BL: Mark items done
+    Agent->>PD: _changelog.md entry
+```
+
+1. **Snapshot** -- The scheduled task runs `pocketdev.py audit`, which scans all repos and writes `_snapshot.json` with current health data.
+2. **Analysis** -- A Claude agent reads the snapshot via `agent-prompt.md` and identifies new issues, regressions, and improvement opportunities.
+3. **Backlog** -- New findings are appended to `_backlog.md`, prioritized by blast radius (security > correctness > maintainability > style).
+4. **Approval** -- You review the backlog at session start. Nothing ships without your sign-off.
+5. **Implementation** -- Approved items are implemented, committed, and logged in `_changelog.md`.
 
 ---
 
@@ -46,11 +76,15 @@ No dependencies to install. Python standard library only.
 
 ---
 
-## Three Modes
+## Four Modes
+
+### `agent` -- Automated daily maintenance (primary)
+
+The agent mode is the main workflow. A scheduled task runs the snapshot, then a Claude agent analyzes the results and maintains the backlog. This is how pocketDEV operates day-to-day.
 
 ### `audit` -- Health scan across all repos
 
-Scans every discovered repo for structural and hygiene problems. The default mode. Run it weekly.
+Scans every discovered repo for structural and hygiene problems. Produces `_snapshot.json` for agent consumption.
 
 ```bash
 python pocketdev.py audit                      # All repos
@@ -118,79 +152,12 @@ python pocketdev.py diagnose "Transcriptor"
 
 ---
 
-## Example Output
+## Backlog and Changelog
 
-What an audit report looks like with a mix of healthy and unhealthy repos:
+pocketDEV maintains two living documents:
 
-```mermaid
-block-beta
-  columns 1
-  block:header
-    A["pocketDEV -- Audit Report"]
-  end
-  block:summary
-    B["4 repos scanned | 3 issues found | 1 test suite passing | 2 with no tests"]
-  end
-  block:results
-    columns 4
-    C["Finance\n HEALTHY"]
-    D["Chat Widget\n HEALTHY"]
-    E["Transcriptor\n 2 ISSUES"]
-    F["Backup System\n 1 ISSUE"]
-  end
-```
-
-```
-# pocketDEV -- Audit Report
-Generated: 2026-04-03 21:00
-Repos scanned: 4
-
-Quick summary: 3 issues found. Tests: 1 passing, 0 failing, 2 with no tests.
-
----
-## Finance -- HEALTHY
-Location: ~/Projects/Finance
-GitHub: vocality-accounting
-
-Files: 402 | Size: 51831KB | Last changed: 2026-04-03 16:49 UTC
-
-Tests: pytest
-Issues: None detected
-
----
-## Chat Widget -- HEALTHY
-Location: ~/Projects/Systems/automations/02-lead-gen-chatbot
-GitHub: vocality-chat-widget
-
-Files: 34 | Size: 14540KB | Last changed: 2026-04-03 16:50 UTC
-
-Tests: None configured
-Issues: None detected
-
----
-## Transcriptor -- 2 ISSUE(S)
-Location: ~/Projects/Transcriptor
-GitHub: transcriptor-v2
-
-Files: 652 | Size: 117899097KB | Last changed: 2026-04-03 16:50 UTC
-
-Tests: pytest
-Issues found:
-- Large file: models/whisper-large-v3.bin (2948.2MB)
-- Stale -- no changes in 45 days
-
----
-## Backup System -- 1 ISSUE(S)
-Location: ~/Projects/Backup System
-GitHub: claude-backup-system
-
-Files: 38 | Size: 54520KB | Last changed: 2026-04-01 18:04 UTC
-Uncommitted: 2 file(s)
-
-Tests: None configured
-Issues found:
-- No .gitignore file -- risk of committing junk
-```
+- **`_backlog.md`** -- Prioritized list of issues and improvements. Each item has a severity, effort estimate, and status (open / approved / done / wontfix). The agent appends new findings daily. You control what gets worked on.
+- **`_changelog.md`** -- Record of every change made through pocketDEV. Each entry includes the date, tool affected, what changed, and which backlog item it resolved.
 
 ---
 
@@ -227,14 +194,14 @@ When you say **"review audit"**, Claude reads the report as pocketDEV -- a senio
 ```powershell
 $action = New-ScheduledTaskAction -Execute 'C:\Program Files\Git\usr\bin\bash.exe' `
     -Argument '"C:\path\to\run-pocketdev.sh" audit'
-$trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At '8:00PM'
+$trigger = New-ScheduledTaskTrigger -Daily -At '8:00PM'
 Register-ScheduledTask -TaskName 'pocketDEV Audit' -Action $action -Trigger $trigger
 ```
 
 ### Linux / macOS (cron)
 
 ```bash
-0 20 * * 0 /path/to/run-pocketdev.sh audit >> /path/to/pocketdev.log 2>&1
+0 20 * * * /path/to/run-pocketdev.sh audit >> /path/to/pocketdev.log 2>&1
 ```
 
 ---
@@ -265,9 +232,15 @@ diagnose TOOL:
 | File | Purpose |
 |---|---|
 | `pocketdev.py` | Core tool -- discovery, audit, review, diagnose |
+| `agent-prompt.md` | System prompt for the Claude agent that analyzes snapshots |
 | `run-pocketdev.sh` | Shell wrapper for cron / Task Scheduler |
+| `setup-task.ps1` | PowerShell script to register the Windows scheduled task |
 | `CLAUDE.md` | System prompt -- defines pocketDEV's persona for Claude Code |
+| `_snapshot.json` | Latest repo health data (generated) |
+| `_backlog.md` | Prioritized issue tracker (generated, agent-maintained) |
+| `_changelog.md` | Record of all changes made through pocketDEV (generated) |
 | `_last-audit.md` | Most recent audit report (generated) |
+| `_last-review.md` | Most recent review report (generated) |
 | `_audit-pending` | Flag file for Claude Code session hook (generated) |
 
 ---
