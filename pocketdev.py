@@ -500,6 +500,22 @@ def find_issues(repo, d, all_files):
     if not any((d / n).exists() for n in ["LICENSE", "LICENSE.md", "LICENSE.txt", "LICENCE"]):
         issues["info"].append("No LICENSE file")
 
+    # Electron app without auto-updater
+    # (Desktop apps should update themselves — users shouldn't have to reinstall manually)
+    electron_pkgs = list(d.rglob("package.json"))
+    for pkg_path in electron_pkgs:
+        try:
+            pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
+            all_deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
+            if "electron" in all_deps and "electron-updater" not in all_deps:
+                rel = pkg_path.relative_to(d)
+                issues["warning"].append(
+                    f"Electron app at `{rel.parent}` has no auto-updater — "
+                    f"users will have to manually reinstall for updates"
+                )
+        except (json.JSONDecodeError, OSError):
+            pass
+
     # ---- INFO: Operational ----
     # Stale
     if all_files:
@@ -883,9 +899,10 @@ def review_repo(repo):
                 todos.append({"file": rel, "line": i, "tag": m.group(1).upper(),
                               "text": line.strip()[:120]})
 
-            for pat in SECRET_PATTERNS:
+            for pat, secret_type in SECRET_PATTERNS:
                 if pat.search(line):
                     secret_hits.append({"file": rel, "line": i,
+                                        "type": secret_type,
                                         "text": line.strip()[:80] + "..."})
                     break
 
