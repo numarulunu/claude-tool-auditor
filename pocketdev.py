@@ -249,6 +249,94 @@ def match_repo(repos, name):
 
 
 # ---------------------------------------------------------------------------
+# RepositoryScanner — single-pass, lazily-cached scanning
+# ---------------------------------------------------------------------------
+
+class RepositoryScanner:
+    """Lazily computes and caches scan results for a single repo.
+
+    Each property runs at most once per instance. Modes pick what they need;
+    shared work (tracked files, security scans) is never duplicated.
+    """
+
+    def __init__(self, repo):
+        self.repo = repo
+        self.d = Path(repo["dir"])
+        self._tracked_files = None
+        self._all_files = None
+        self._tests_info = None
+        self._test_result = None
+        self._security = None
+        self._dependencies = None
+
+    # -- lazy properties --
+
+    @property
+    def tracked_files(self):
+        if self._tracked_files is None:
+            self._tracked_files = get_tracked_files(self.repo["dir"])
+        return self._tracked_files
+
+    @property
+    def all_files(self):
+        """List of (Path, size_bytes, mtime) for every non-skipped file."""
+        if self._all_files is None:
+            result = []
+            for f in self.d.rglob("*"):
+                if any(part in SKIP_DIRS for part in f.parts):
+                    continue
+                if f.is_file():
+                    try:
+                        st = f.stat()
+                        result.append((f, st.st_size, st.st_mtime))
+                    except OSError:
+                        pass
+            self._all_files = result
+        return self._all_files
+
+    @property
+    def tests_info(self):
+        if self._tests_info is None:
+            self._tests_info = detect_tests(self.d)
+        return self._tests_info
+
+    @property
+    def test_result(self):
+        if self._test_result is None:
+            self._test_result = run_tests(self.d, self.tests_info)
+        return self._test_result
+
+    @property
+    def security(self):
+        """Dict with secrets_found, pii_found, history_issues lists."""
+        if self._security is None:
+            rd = self.repo["dir"]
+            self._security = {
+                "secrets_found": scan_secrets(rd, self.d, self.tracked_files),
+                "pii_found": scan_pii(rd, self.d, self.tracked_files),
+                "history_issues": scan_history(rd),
+            }
+        return self._security
+
+    @property
+    def dependencies(self):
+        if self._dependencies is None:
+            self._dependencies = check_dependencies(self.d)
+        return self._dependencies
+
+    def scan_all(self):
+        """Force-compute everything and return a summary dict."""
+        return {
+            "tracked_files": self.tracked_files,
+            "all_files_count": len(self.all_files),
+            "tests_info": self.tests_info,
+            "test_result": self.test_result,
+            "security": self.security,
+            "dependencies": self.dependencies,
+        }
+
+
+# ---------------------------------------------------------------------------
 # AUDIT mode
 # ---------------------------------------------------------------------------
 
@@ -270,16 +358,8 @@ def audit_repo(repo):
         result["issues"]["critical"].append("Directory does not exist")
         return result
 
-    # --- File stats ---
-    all_files = []
-    for f in d.rglob("*"):
-        if any(part in SKIP_DIRS for part in f.parts):
-            continue
-        if f.is_file():
-            try:
-                all_files.append((f, f.stat().st_size, f.stat().st_mtime))
-            except OSError:
-                pass
+    scanner = RepositoryScanner(repo)
+    all_files = scanner.all_files
 
     result["stats"] = {
         "file_count": len(all_files),
@@ -306,8 +386,8 @@ def audit_repo(repo):
         result["stats"]["unpushed"] = len(stdout.split("\n"))
 
     # --- Tests ---
-    result["tests"] = detect_tests(d)
-    result["test_result"] = run_tests(d, result["tests"])
+    result["tests"] = scanner.tests_info
+    result["test_result"] = scanner.test_result
 
     # --- Issues (comprehensive) ---
     result["issues"] = find_issues(repo, d, all_files)
@@ -845,11 +925,12 @@ def review_repo(repo):
     review["commented_code"] = commented_code[:20]
     review["long_functions"] = sorted(long_functions, key=lambda x: x["lines"], reverse=True)[:10]
 
-    # --- Dependency health ---
-    review["deps"] = check_dependencies(d)
+    # --- Dependency health (via scanner) ---
+    scanner = RepositoryScanner(repo)
+    review["deps"] = scanner.dependencies
 
     # --- Test coverage ---
-    tests = detect_tests(d)
+    tests = scanner.tests_info
     test_files = []
     src_files = []
     for f, rel in iter_source_files(repo["dir"]):
@@ -1061,27 +1142,16 @@ def diagnose_repo(repo):
     code, stdout, _ = run_cmd(["git", "diff", "--stat"], cwd=repo["dir"])
     diag["uncommitted_diff"] = stdout if code == 0 and stdout else None
 
-    # --- Run tests ---
+    # --- Run tests (via scanner) ---
+    scanner = RepositoryScanner(repo)
     diag["test_output"] = None
     diag["test_passed"] = None
-    tests = detect_tests(d)
 
-    if tests["has_tests"]:
-        if tests["framework"] == "pytest":
-            code, stdout, stderr = run_cmd(
-                ["python", "-m", "pytest", "-x", "--tb=short", "-q"],
-                cwd=repo["dir"], timeout=120
-            )
-            diag["test_output"] = (stdout + "\n" + stderr).strip()
-            diag["test_passed"] = code == 0
-
-        elif tests["framework"] == "npm test":
-            code, stdout, stderr = run_cmd(
-                ["npm", "test", "--", "--watchAll=false"],
-                cwd=repo["dir"], timeout=120
-            )
-            diag["test_output"] = (stdout + "\n" + stderr).strip()[-3000:]
-            diag["test_passed"] = code == 0
+    if scanner.tests_info["has_tests"]:
+        tr = scanner.test_result
+        if tr.get("ran"):
+            diag["test_output"] = tr.get("output")
+            diag["test_passed"] = tr.get("passed")
 
     # --- Check for error logs ---
     log_files = []
@@ -1232,22 +1302,10 @@ def format_diagnose_report(diag):
 # SNAPSHOT mode
 # ---------------------------------------------------------------------------
 
-def snapshot_repo(repo):
-    """Generate a structured dict of repo health data for agent consumption."""
-    d = Path(repo["dir"])
-    snap = {
-        "name": repo["name"],
-        "dir": repo["dir"],
-        "remote": repo["remote"],
-        "exists": d.exists(),
-    }
-
-    if not d.exists():
-        return snap
-
-    # --- Git info ---
-    git_info = {}
+def _snapshot_git_info(repo):
+    """Collect git branch, commit history, and sync status for a snapshot."""
     rd = repo["dir"]
+    git_info = {}
 
     code, stdout, _ = run_cmd(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=rd,
                                cache_key=(rd, ("git", "rev-parse", "--abbrev-ref", "HEAD")))
@@ -1283,10 +1341,12 @@ def snapshot_repo(repo):
                                cache_key=(rd, ("git", "rev-list", "--count", "HEAD..@{u}")))
     git_info["behind_remote"] = int(stdout.strip()) if code == 0 and stdout.strip().isdigit() else 0
 
-    snap["git"] = git_info
+    return git_info
 
-    # --- File stats ---
-    tracked = get_tracked_files(repo["dir"])
+
+def _snapshot_files(repo_dir, tracked):
+    """Compute extension counts, LOC, and largest files for a snapshot."""
+    d = Path(repo_dir)
     ext_counter = Counter()
     file_lines = []
     total_loc = 0
@@ -1306,66 +1366,23 @@ def snapshot_repo(repo):
 
     file_lines.sort(key=lambda x: x["lines"], reverse=True)
 
-    snap["files"] = {
+    return {
         "total": len(tracked),
         "by_extension": dict(ext_counter.most_common()),
         "largest": file_lines[:10],
         "total_loc": total_loc,
     }
 
-    # --- Tests ---
-    tests_info = detect_tests(d)
-    test_result = run_tests(d, tests_info)
-    snap["tests"] = {
-        "framework": tests_info["framework"],
-        "has_tests": tests_info["has_tests"],
-        "ran": test_result.get("ran", False),
-        "passed": test_result.get("passed"),
-        "output_tail": (test_result.get("output") or "")[-300:] or None,
-    }
 
-    # --- Security ---
-    secrets_found = scan_secrets(repo["dir"], d, tracked)
-    pii_found = scan_pii(repo["dir"], d, tracked)
-    history_issues = scan_history(repo["dir"])
+def _snapshot_structure(repo_dir, tracked, has_tests):
+    """Check README, LICENSE, gitignore, and find entrypoints for a snapshot."""
+    d = Path(repo_dir)
 
-    sensitive_tracked = []
-    for tf in tracked:
-        fname = Path(tf).name.lower()
-        if fname in SENSITIVE_FILES or Path(tf).suffix.lower() in SENSITIVE_EXTENSIONS:
-            sensitive_tracked.append(tf)
-
-    # Collect detail strings (top 5)
-    details = []
-    for s in secrets_found[:3]:
-        details.append(f"SECRET {s['file']}:{s['line']} — {s['type']}")
-    for p in pii_found[:2]:
-        details.append(f"PII {p['file']}:{p['line']} — {p['type']}")
-
-    snap["security"] = {
-        "secrets_found": len(secrets_found),
-        "pii_found": len(pii_found),
-        "sensitive_files_tracked": sensitive_tracked,
-        "history_issues": len(history_issues),
-        "details": details[:5],
-    }
-
-    # --- Dependencies ---
-    deps = check_dependencies(d)
-    snap["dependencies"] = {
-        "manager": deps["manager"],
-        "count": deps["count"],
-        "lockfile": deps["lockfile"],
-        "outdated": len(deps["outdated"]),
-    }
-
-    # --- Structure ---
     has_readme = any((d / n).exists() for n in ["README.md", "readme.md", "README.txt", "README"])
     has_license = any((d / n).exists() for n in ["LICENSE", "LICENSE.md", "LICENSE.txt", "LICENCE"])
     has_gitignore = (d / ".gitignore").exists()
     has_tests_dir = (d / "tests").exists() or (d / "test").exists()
 
-    # Find entrypoints
     entrypoints = []
     for tf in tracked:
         fpath = d / tf.replace("/", os.sep)
@@ -1378,7 +1395,6 @@ def snapshot_repo(repo):
         if content and ('if __name__' in content or 'def main(' in content):
             entrypoints.append(tf)
 
-    # npm scripts
     if (d / "package.json").exists():
         try:
             pkg = json.loads((d / "package.json").read_text(encoding="utf-8"))
@@ -1388,13 +1404,81 @@ def snapshot_repo(repo):
         except (json.JSONDecodeError, OSError):
             pass
 
-    snap["structure"] = {
+    return {
         "has_readme": has_readme,
         "has_license": has_license,
         "has_gitignore": has_gitignore,
-        "has_tests": has_tests_dir or tests_info["has_tests"],
+        "has_tests": has_tests_dir or has_tests,
         "entrypoints": entrypoints,
     }
+
+
+def snapshot_repo(repo):
+    """Generate a structured dict of repo health data for agent consumption."""
+    d = Path(repo["dir"])
+    snap = {
+        "name": repo["name"],
+        "dir": repo["dir"],
+        "remote": repo["remote"],
+        "exists": d.exists(),
+    }
+
+    if not d.exists():
+        return snap
+
+    scanner = RepositoryScanner(repo)
+
+    # Git info
+    snap["git"] = _snapshot_git_info(repo)
+
+    # File stats
+    snap["files"] = _snapshot_files(repo["dir"], scanner.tracked_files)
+
+    # Tests
+    tr = scanner.test_result
+    snap["tests"] = {
+        "framework": scanner.tests_info["framework"],
+        "has_tests": scanner.tests_info["has_tests"],
+        "ran": tr.get("ran", False),
+        "passed": tr.get("passed"),
+        "output_tail": (tr.get("output") or "")[-300:] or None,
+    }
+
+    # Security
+    sec = scanner.security
+    sensitive_tracked = []
+    for tf in scanner.tracked_files:
+        fname = Path(tf).name.lower()
+        if fname in SENSITIVE_FILES or Path(tf).suffix.lower() in SENSITIVE_EXTENSIONS:
+            sensitive_tracked.append(tf)
+
+    details = []
+    for s in sec["secrets_found"][:3]:
+        details.append(f"SECRET {s['file']}:{s['line']} — {s['type']}")
+    for p in sec["pii_found"][:2]:
+        details.append(f"PII {p['file']}:{p['line']} — {p['type']}")
+
+    snap["security"] = {
+        "secrets_found": len(sec["secrets_found"]),
+        "pii_found": len(sec["pii_found"]),
+        "sensitive_files_tracked": sensitive_tracked,
+        "history_issues": len(sec["history_issues"]),
+        "details": details[:5],
+    }
+
+    # Dependencies
+    deps = scanner.dependencies
+    snap["dependencies"] = {
+        "manager": deps["manager"],
+        "count": deps["count"],
+        "lockfile": deps["lockfile"],
+        "outdated": len(deps["outdated"]),
+    }
+
+    # Structure
+    snap["structure"] = _snapshot_structure(
+        repo["dir"], scanner.tracked_files, scanner.tests_info["has_tests"]
+    )
 
     return snap
 
