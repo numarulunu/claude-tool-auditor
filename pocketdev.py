@@ -1753,15 +1753,34 @@ def release_electron(repo, bump_type="patch", notes=None):
     print(f"[release] Release created: {stdout}", file=sys.stderr)
 
     # Upload the large installer separately (gh release create can silently drop large files)
+    installer_name = installer.name
     print(f"[release] Uploading installer ({installer.stat().st_size // 1024 // 1024}MB)...", file=sys.stderr)
     code, stdout, stderr = run_cmd(
         ["gh", "release", "upload", f"v{new_version}", str(installer), "--clobber"],
         cwd=repo["dir"], timeout=600
     )
     if code != 0:
-        print(f"[release] WARNING: Installer upload failed: {stderr}", file=sys.stderr)
+        print(f"[release] WARNING: Installer upload may have failed: {stderr}", file=sys.stderr)
+
+    # Verify the upload actually landed
+    code, stdout, _ = run_cmd(
+        ["gh", "release", "view", f"v{new_version}", "--json", "assets", "-q", ".assets[].name"],
+        cwd=repo["dir"], timeout=30
+    )
+    if code == 0 and installer_name in stdout:
+        print(f"[release] Verified: {installer_name} is on GitHub.", file=sys.stderr)
     else:
-        print(f"[release] Installer uploaded.", file=sys.stderr)
+        print(f"[release] ERROR: {installer_name} NOT found on release. Retrying...", file=sys.stderr)
+        # Retry once
+        code, _, stderr = run_cmd(
+            ["gh", "release", "upload", f"v{new_version}", str(installer), "--clobber"],
+            cwd=repo["dir"], timeout=600
+        )
+        if code != 0:
+            print(f"[release] FAILED: Could not upload installer: {stderr}", file=sys.stderr)
+            return False
+
+    print(f"[release] Published: v{new_version}", file=sys.stderr)
     print(f"[release] Users with the app installed will get this update automatically.", file=sys.stderr)
     return True
 
