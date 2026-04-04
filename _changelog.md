@@ -3,6 +3,30 @@
 Narrative log of every change made to the tool portfolio, with reasoning and decision context.
 Reverse chronological order. One entry per logical change.
 
+## 2026-04-04 — Chat Widget: Error handling overhaul
+**What changed:** Fixed 2 empty `catch {}` blocks in vocality-chat.js. Added 10-second timeout and 1-retry with 2s delay on the n8n webhook call. All errors now log with `[VocalityChat]` prefix.
+**Why:** Empty catch blocks were silently swallowing all errors. Users saw a dead widget with no feedback. Webhook had no timeout — a hung request blocked the UI indefinitely.
+**Impact:** Errors are now visible in console. Webhook failures show user-facing fallback (WhatsApp link). Transient network failures handled by retry.
+**Decision context:** pocketDEV operational maturity assessment identified Chat Widget as the most operationally naked repo in the portfolio.
+
+## 2026-04-04 — Finance: Structured logging
+**What changed:** Replaced 39 `print()` calls in contabilitate.py with Python `logging` module. 32 info, 7 warning. Log file writes to `contabilitate.log` with timestamps. Final summary output kept as print() for interactive use.
+**Why:** When run from Task Scheduler, print() output vanishes. This tool processes real financial data — silent failures cost real money.
+**Impact:** All processing steps now logged with timestamps and severity. 42 tests still passing.
+**Decision context:** pocketDEV operational assessment flagged Finance and Transcriptor as the two highest-risk tools for silent failures.
+
+## 2026-04-04 — Claude Codex: React error boundary
+**What changed:** Added ErrorBoundary component wrapping the root App tree. Catches render crashes, shows recovery UI with "Try Again" button, logs to console.error.
+**Why:** No error boundary meant one bad render in any component = white screen with no recovery.
+**Impact:** App now survives render crashes gracefully.
+**Decision context:** pocketDEV operational assessment. Low effort (20 min), medium impact.
+
+## 2026-04-04 — Skool: Exponential backoff retry
+**What changed:** Wrapped Claude CLI subprocess call in extract.py with retry loop: 3 attempts at 30s/60s/120s delays. Distinguishes rate limits, timeouts, and permanent errors.
+**Why:** Parallel extraction (--parallel 3-4) hits rate limits. Previously recorded as permanent failures requiring manual --retry-failed. Now handles transient failures automatically.
+**Impact:** Batch extractions can complete without manual intervention on rate limits.
+**Decision context:** pocketDEV backlog item + operational assessment. Skool's extraction pipeline is the primary consumer of Claude API calls.
+
 ---
 
 ## 2026-04-04
