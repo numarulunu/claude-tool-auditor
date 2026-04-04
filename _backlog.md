@@ -108,3 +108,35 @@ Last updated: 2026-04-04
 **What:** `pocketdev.py` runs `git ls-files`, `git status --porcelain`, `git log` etc. independently in `audit_repo()`, `snapshot_repo()`, and `review_repo()`. If multiple modes are run in sequence (e.g. snapshot then audit), the same git commands run twice. Add a simple `GitCache` class that memoizes subprocess results by `(repo_dir, command_tuple)` with a 60-second TTL.
 **Why:** Minor optimization, but it matters when running the full suite across 11 repos. Each repo currently runs 8-10 git commands per mode. Caching across modes would halve the subprocess count.
 **Added:** 2026-04-04
+
+## Cross-Portfolio — Operational Gaps
+
+### [NEW] Add structured logging to Finance and Transcriptor v2
+**Impact:** High | **Effort:** 1-2 hours each
+**What:** Both tools use `print()` for all output. Replace with Python's `logging` module configured to write to a `.log` file with timestamps and severity levels. Finance: `contabilitate.py` has ~30 print calls. Transcriptor: `process_v2.py` has ~88 print calls. Configure `logging.basicConfig(filename='tool.log', level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')` and replace print→logging calls.
+**Why:** When run from Task Scheduler or background processes, `print()` output vanishes. These are the two tools where silent failures cost real money (Finance) or real time (Transcriptor). Structured logs with timestamps are essential for debugging scheduled runs.
+**Added:** 2026-04-04
+
+### [NEW] Add tests to Transcriptor v2
+**Impact:** High | **Effort:** 4-6 hours
+**What:** Zero test files exist for a tool with GPU retry logic (`_transcribe_with_retry`), multi-threaded processing, diarization recovery, and API endpoints. Priority test targets: (1) `_transcribe_with_retry` — mock whisper, verify retry on OOM, (2) file type dispatch in `_process_file_wrapper`, (3) diarization recovery path at `process_v2.py:856-934`, (4) API route handlers.
+**Why:** Most complex tool in the portfolio with the highest failure surface area. GPU OOM recovery, file format detection, and multi-threading are all untested. A regression here means hours of re-processing.
+**Added:** 2026-04-04
+
+### [NEW] Fix Chat Widget empty catch blocks and add error handling
+**Impact:** High | **Effort:** 30 minutes
+**What:** `widget/vocality-chat.js` has empty `catch {}` blocks that silently swallow all errors. Replace with `catch (err) { console.error('Widget error:', err); }`. Add a 10-second timeout and basic retry (1 attempt) on the n8n webhook call. The widget currently has zero error feedback to the user — if the API fails, nothing happens.
+**Why:** Actively hiding errors. Users get a dead chat widget with no indication anything went wrong. The n8n webhook has no timeout — a hung request blocks the UI indefinitely.
+**Added:** 2026-04-04
+
+### [NEW] Add React error boundary to Claude Codex
+**Impact:** Medium | **Effort:** 20 minutes
+**What:** No error boundary exists in the React app. A single uncaught render error crashes the entire app to a white screen. Add an `ErrorBoundary` component at the root (`src/App.jsx` or equivalent) that catches render errors and shows a fallback UI.
+**Why:** React apps without error boundaries have zero crash resilience. One bad state in any component takes down everything.
+**Added:** 2026-04-04
+
+### [NEW] Add retry with backoff to Preply Messenger send operations
+**Impact:** Medium | **Effort:** 1 hour
+**What:** `src/messenger.js` sends messages via Playwright page interactions with no retry on failure. If a page navigation times out or an element selector fails, the message is lost. Add retry logic (3 attempts, 5s/10s/20s backoff) around the send operation. Log failures to `logs/activity.log` (structured logging already exists in this repo).
+**Why:** Network blips or Preply UI changes cause transient failures. Currently these are permanent failures requiring manual re-run. Retry with backoff would handle the common case automatically.
+**Added:** 2026-04-04
