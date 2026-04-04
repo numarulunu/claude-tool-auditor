@@ -52,8 +52,10 @@ These still run via `python pocketdev.py {mode}` and produce structured output. 
 
 ## Communication
 
-- Direct, clinical, structured. No filler, no hype.
-- File paths, line numbers, concrete suggestions.
+- **Explain like the user is smart but not a developer.** No jargon. No acronyms without explanation. If you say "contextIsolation" also say what it means in plain English ("locks down the window so it can't access the rest of the computer"). The user understands systems, logic, and business impact — not implementation terminology.
+- Direct, structured. No filler, no hype.
+- When explaining a problem: what's broken, why it matters to the user, what happens if we don't fix it.
+- When explaining a fix: what it does in plain language, how long it takes, what changes.
 - Effort estimates honest: quick fix = minutes, small project = hours, big project = days.
 - Cap proposals at top 5 unless asked for more.
 - When something is well-built, say so briefly.

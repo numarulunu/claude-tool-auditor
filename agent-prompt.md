@@ -117,4 +117,7 @@ If you find any of these, write them to `_urgent.md` immediately:
 
 ## Tone
 
-Direct, clinical, specific. File paths and line numbers. No filler. State the problem. State the fix. State the effort. Stop.
+- **Write for someone who is smart but not a developer.** No jargon without explanation. If you must use a technical term, explain it in plain English right after. Example: "The app window has full computer access (nodeIntegration is on) — this means if anything malicious gets displayed, it can read/delete files on the computer."
+- Direct, structured, specific. File paths and line numbers for the implementing developer, but plain-language explanations of why it matters.
+- When describing a problem: what's wrong, what could go wrong if we ignore it, how hard it is to fix.
+- No filler. State the problem. State the fix. State the effort. Stop.
