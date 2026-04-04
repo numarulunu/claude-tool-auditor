@@ -194,19 +194,14 @@ class TestScanPii:
         path_hits = [h for h in hits if "path" in h["type"].lower()]
         assert len(path_hits) >= 1
 
-    def test_windows_path_with_expanduser_still_flagged(self, tmp_path):
-        """Due to a bug in pii_type matching, the expanduser skip logic
-        is dead code. The label includes '(leaks username)' but the check
-        compares against 'Windows user path' without the suffix.
-        This test documents actual behavior."""
+    def test_windows_path_with_expanduser_skipped(self, tmp_path):
+        """Paths using expanduser/Path.home/$HOME are code references, not PII leaks."""
         tracked = _make_repo(tmp_path, {
             "paths.py": 'p = expanduser("C:\\Users\\JohnDoe\\Desktop")',
         })
         hits = pocketdev.scan_pii(str(tmp_path), tmp_path, set(tracked))
         path_hits = [h for h in hits if "path" in h["type"].lower()]
-        # Currently flagged because the skip logic's string comparison
-        # doesn't match the full label "Windows user path (leaks username)"
-        assert len(path_hits) >= 1
+        assert len(path_hits) == 0
 
     def test_detects_phone_with_plus(self, tmp_path):
         tracked = _make_repo(tmp_path, {

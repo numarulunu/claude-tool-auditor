@@ -1,6 +1,68 @@
 # pocketDEV Improvement Backlog
 Last updated: 2026-04-04
 
+## Transcriptor v2
+
+### [DONE] Fix thread safety: _diarize_total and progress_bar unprotected across threads
+**Impact:** High | **Effort:** Quick fix (30 minutes)
+**What:** `process_v2.py:464,597,704` — `self._diarize_total` is incremented from multiple worker threads without any lock. `self.progress_bar.update()` is called from multiple threads at lines 441, 467, 473, 480 without synchronization. Add `_diarize_total_lock` and `_progress_lock` to `__init__()` and wrap all access points.
+**Why:** Data race on a live counter. `_diarize_total` is read at line 554 for display while workers increment it — value can be torn on non-atomic int operations. Progress bar corruption causes garbled terminal output during multi-file processing.
+**Added:** 2026-04-04
+
+### [DONE] Extract process_all() (271 lines) into 3 pipeline phases
+**Impact:** High | **Effort:** Small project (3-4 hours)
+**What:** `process_v2.py:483-753` is a 271-line god function doing setup/filtering (483-510), whisper init + task dispatch (511-660), and retry + diarization drain (661-751). Extract into `_prepare_materials()`, `_run_primary_processing()`, `_run_diarization_drain()`. The nested `_diarize_worker()` closure at line 569 should become a method.
+**Why:** Untestable monolith. Each phase has distinct responsibilities and failure modes (GPU init vs. thread coordination vs. diarization). Extracting phases enables targeted tests and makes resume/checkpoint logic feasible.
+**Added:** 2026-04-04
+
+### [DONE] Log futures exceptions instead of silently swallowing them
+**Impact:** High | **Effort:** Quick fix (15 minutes)
+**What:** `process_v2.py:649-650` — `except Exception: pass` silently drops all worker thread exceptions including GPU OOM, CUDA crashes, and file corruption. Replace with `logger.error("Worker exception: %s", e)` and increment `self.stats['errors']`. Same pattern at lines 728-729 (diarizer GPU move) and 910 (diarize recovery).
+**Why:** GPU crashes and OOM errors are invisible. When processing fails on a file, the only evidence is a missing output — no log entry, no error count, no stack trace. Debugging production failures requires re-running with print statements.
+**Added:** 2026-04-04
+
+## pocketDEV
+
+### [DONE] Add test suite for core scanning functions
+**Impact:** High | **Effort:** Small project (4-6 hours)
+**What:** `pocketdev.py` has zero tests despite being the most active repo (20 commits/30d) and the longest file (1672 lines). Priority targets: (1) `scan_secrets()` lines 444-482 — mock files with known patterns, verify detection, (2) `scan_pii()` lines 485-548 — verify false-positive filtering, (3) `find_issues()` lines 351-441 — integration of all scans, (4) `parse_backlog()` lines 1452-1480 — parse known markdown structures, (5) `snapshot_repo()` lines 1235-1399 — mock git commands, verify JSON structure.
+**Why:** Every scan improvement risks breaking existing detection. The PII false-positive filters (lines 534-537) and secret patterns (line 57) are regex-heavy and need regression protection. Backlog parsing is used by automation and has no validation.
+**Added:** 2026-04-04
+
+### [NEW] Extract shared scanning into a RepositoryScanner class
+**Impact:** High | **Effort:** Small project (3-4 hours)
+**What:** `scan_secrets()`, `scan_pii()`, `scan_history()`, `detect_tests()`, `run_tests()`, `check_dependencies()` are called independently from `audit_repo()` (lines 313-314), `review_repo()` (lines 800-846), `snapshot_repo()` (lines 1317-1360), and `diagnose_repo()` (lines 1070-1084). Each mode re-reads tracked files and re-runs git commands. Consolidate into a `RepositoryScanner` class that reads files once, runs all scans in a single pass, and exposes results as a dict. All four modes call `scanner.scan_all()` instead of individual functions.
+**Why:** ~200 lines of duplication across modes. Adding a new scan (e.g., license compliance) requires changes in 4 places. Single-pass scanning would be 3x faster (one file read instead of three).
+**Added:** 2026-04-04
+
+### [NEW] Extract snapshot_repo() (165 lines) into composable sub-functions
+**Impact:** Medium | **Effort:** Small project (2-3 hours)
+**What:** `pocketdev.py:1235-1399` is the largest function in the file. It collects git info (1252-1284), file stats (1285-1316), test results (1317-1325), security data (1328-1351), dependencies (1354-1360), and structure (1363-1399). Extract into `_snapshot_git_info()`, `_snapshot_files()`, `_snapshot_tests()`, `_snapshot_security()`, `_snapshot_dependencies()`, `_snapshot_structure()`. Orchestrator becomes ~30 lines assembling a dict.
+**Why:** Each sub-function is independently testable. The git info collection (12 subprocess calls) is the main performance bottleneck — isolating it enables targeted caching. Currently, any change to the snapshot format risks breaking unrelated sections.
+**Added:** 2026-04-04
+
+## UsageBOT
+
+### [DONE] Commit 5 uncommitted files (start.bat, test.js, and 3 modified)
+**Impact:** Medium | **Effort:** Quick fix (5 minutes)
+**What:** `git status` shows 5 uncommitted files: `start.bat` (new), `test.js` (new, 46-test suite), `README.md` (modified), `package.json` (modified — added test/parse:quiet scripts), `serve.js` (modified — added /api/refresh endpoint). These are completed features from the last improvement cycle sitting uncommitted.
+**Why:** Uncommitted work is unversioned and unrecoverable if the machine fails. The test suite (`test.js`) is the most critical — losing it means re-writing 46 tests.
+**Added:** 2026-04-04
+
+### [DONE] Fix Set serialization in JSON output — allFiles lost on stringify
+**Impact:** Medium | **Effort:** Quick fix (15 minutes)
+**What:** `parse-claude-data.js:360` — `allFiles` is stored as a JavaScript `Set`. When the output object is passed to `JSON.stringify()` at line 638, Sets serialize to `{}` (empty object), silently losing all file tracking data. Convert `allFiles` to `Array.from(allFiles)` before JSON serialization, or use an Array throughout.
+**Why:** Any downstream consumer reading `usage-stats.json` gets an empty object for `allFiles` instead of the actual file list. The data is collected correctly but discarded at write time.
+**Added:** 2026-04-04
+
+## Skool
+
+### [DONE] Extract extract_transcript() (154 lines) into focused functions
+**Impact:** Medium | **Effort:** Small project (2 hours)
+**What:** `extract.py:244-398` handles 4 distinct responsibilities: temp file creation (270-274), subprocess execution with backoff (276-318), JSON extraction and repair (322-363), and key validation (373-390). Extract into `_build_prompt_file()`, `_call_claude_cli()`, `_parse_and_repair_json()`, `_validate_keys()`. The JSON repair logic (lines 336-357) is particularly complex bracket/quote matching that deserves its own function and tests.
+**Why:** The JSON repair logic is brittle — it uses `rfind` to locate cut points in truncated responses. Isolating it makes targeted testing possible. Currently, testing any part of extraction requires mocking the entire Claude CLI subprocess chain.
+**Added:** 2026-04-04
+
 ## Finance
 
 ### [DONE] Extract main() into a pipeline of named stages

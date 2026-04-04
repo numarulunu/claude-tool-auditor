@@ -531,7 +531,7 @@ def scan_pii(repo_dir, d, tracked):
                         # Must start with + to count
                         if not match_text.startswith("+"):
                             continue
-                    if pii_type in ("Windows user path", "Home directory path"):
+                    if pii_type in ("Windows user path (leaks username)", "Home directory path (leaks username)"):
                         # Only flag if it's an actual literal path, not a variable/template
                         if any(x in line for x in ["$HOME", "${", "os.homedir", "expanduser",
                                 "Path.home", "__file__", "process.env"]):
