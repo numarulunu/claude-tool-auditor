@@ -29,13 +29,13 @@ Last updated: 2026-04-04
 **Why:** Every scan improvement risks breaking existing detection. The PII false-positive filters (lines 534-537) and secret patterns (line 57) are regex-heavy and need regression protection. Backlog parsing is used by automation and has no validation.
 **Added:** 2026-04-04
 
-### [NEW] Extract shared scanning into a RepositoryScanner class
+### [DONE] Extract shared scanning into a RepositoryScanner class
 **Impact:** High | **Effort:** Small project (3-4 hours)
 **What:** `scan_secrets()`, `scan_pii()`, `scan_history()`, `detect_tests()`, `run_tests()`, `check_dependencies()` are called independently from `audit_repo()` (lines 313-314), `review_repo()` (lines 800-846), `snapshot_repo()` (lines 1317-1360), and `diagnose_repo()` (lines 1070-1084). Each mode re-reads tracked files and re-runs git commands. Consolidate into a `RepositoryScanner` class that reads files once, runs all scans in a single pass, and exposes results as a dict. All four modes call `scanner.scan_all()` instead of individual functions.
 **Why:** ~200 lines of duplication across modes. Adding a new scan (e.g., license compliance) requires changes in 4 places. Single-pass scanning would be 3x faster (one file read instead of three).
 **Added:** 2026-04-04
 
-### [NEW] Extract snapshot_repo() (165 lines) into composable sub-functions
+### [DONE] Extract snapshot_repo() (165 lines) into composable sub-functions
 **Impact:** Medium | **Effort:** Small project (2-3 hours)
 **What:** `pocketdev.py:1235-1399` is the largest function in the file. It collects git info (1252-1284), file stats (1285-1316), test results (1317-1325), security data (1328-1351), dependencies (1354-1360), and structure (1363-1399). Extract into `_snapshot_git_info()`, `_snapshot_files()`, `_snapshot_tests()`, `_snapshot_security()`, `_snapshot_dependencies()`, `_snapshot_structure()`. Orchestrator becomes ~30 lines assembling a dict.
 **Why:** Each sub-function is independently testable. The git info collection (12 subprocess calls) is the main performance bottleneck — isolating it enables targeted caching. Currently, any change to the snapshot format risks breaking unrelated sections.
