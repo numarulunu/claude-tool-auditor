@@ -3,13 +3,13 @@ Last updated: 2026-04-04
 
 ## Finance
 
-### [NEW] Extract main() into a pipeline of named stages
+### [DONE] Extract main() into a pipeline of named stages
 **Impact:** High | **Effort:** 2-3 hours
 **What:** `contabilitate.py:116-712` is a single 596-line `main()` function. Split into pipeline stages: `parse_bank_statements()` (lines 141-198), `process_income_sources()` (lines 199-320), `process_invoices()` (lines 321-495), `generate_outputs()` (lines 496-584), `print_summary()` (lines 586-712). Each stage returns a typed dataclass (e.g. `IncomeResult`, `ExpenseResult`) that feeds the next.
 **Why:** A single function this long is untestable. Each income source (Preply, Stripe, RI invoices) follows the same pattern (parse -> convert FX -> create RJIP entries -> accumulate monthly totals) but the logic is inlined and repeated. Extracting stages makes each one independently testable and lets you add new income sources (Skool, direct invoices) without touching a 600-line function.
 **Added:** 2026-04-04
 
-### [NEW] Eliminate mutable state on function object for fitness cap tracking
+### [DONE] Eliminate mutable state on function object for fitness cap tracking
 **Impact:** Medium | **Effort:** 15 minutes
 **What:** `contabilitate.py:400-401` uses `main._fitness_ytd` — a dict attached to the function object itself — to track year-to-date fitness deductions across loop iterations. Replace with a local variable initialized before the invoice loop at line 337 (e.g. `fitness_ytd_eur = 0.0`).
 **Why:** Storing mutable state on a function object is a subtle bug vector. If `main()` is ever called twice in the same process (tests, multi-year runs), the state persists across calls. A local variable scoped to the loop is cleaner and correct.
@@ -23,7 +23,7 @@ Last updated: 2026-04-04
 
 ## Backup System
 
-### [NEW] Replace fragile cp -ru with rsync-style incremental sync
+### [DONE] Replace fragile cp -ru with rsync-style incremental sync
 **Impact:** High | **Effort:** 1 hour
 **What:** `backup.sh:86` uses `cp -ru "$PROJECTS_DIR/" "$CONV_DIR/"` to sync conversations. This fails silently on permission errors and copies the entire directory tree every time. Replace with `rsync -a --delete` (available in Git Bash on Windows via MSYS2) or rewrite the conversation sync as a Python script that does incremental copy based on mtime comparison.
 **Why:** The current approach has failed silently in the past (the `log_warn` on line 89 catches the exit code but not partial failures). With conversation files growing over time, a proper incremental sync avoids copying gigabytes of unchanged JSONL files.
@@ -57,7 +57,7 @@ Last updated: 2026-04-04
 
 ## UsageBOT
 
-### [NEW] Move data embedding from mutation to template injection
+### [DONE] Move data embedding from mutation to template injection
 **Impact:** High | **Effort:** 1 hour
 **What:** `parse-claude-data.js:598-610` embeds the usage stats JSON into `index.html` by string-replacing the last `<script>` tag. This is fragile: it uses `lastIndexOf('<script>')` and a regex replace to strip the previous embedded data. If the HTML structure changes (e.g. another script tag is added), this silently corrupts the file. Replace with a designated placeholder comment (e.g. `/* __USAGE_DATA__ */`) and do a targeted replacement, or better, write to a separate `usage-stats-embedded.js` file that `index.html` imports.
 **Why:** The current approach has destroyed the index.html structure at least once during development (the regex on line 602 is greedy with `[\s\S]*?`). A separate data file eliminates the mutation risk entirely and makes the HTML stable across runs.
@@ -111,7 +111,7 @@ Last updated: 2026-04-04
 
 ## Cross-Portfolio — Operational Gaps
 
-### [DONE] Add structured logging to Finance (Transcriptor still pending)
+### [DONE] Add structured logging to Finance and Transcriptor v2
 **Impact:** High | **Effort:** 1-2 hours each
 **What:** Both tools use `print()` for all output. Replace with Python's `logging` module configured to write to a `.log` file with timestamps and severity levels. Finance: `contabilitate.py` has ~30 print calls. Transcriptor: `process_v2.py` has ~88 print calls. Configure `logging.basicConfig(filename='tool.log', level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')` and replace print→logging calls.
 **Why:** When run from Task Scheduler or background processes, `print()` output vanishes. These are the two tools where silent failures cost real money (Finance) or real time (Transcriptor). Structured logs with timestamps are essential for debugging scheduled runs.

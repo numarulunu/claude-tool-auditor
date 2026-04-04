@@ -3,6 +3,30 @@
 Narrative log of every change made to the tool portfolio, with reasoning and decision context.
 Reverse chronological order. One entry per logical change.
 
+## 2026-04-04 — Finance: Extract main() into pipeline stages
+**What changed:** Split 596-line main() in contabilitate.py into 5 named functions: parse_bank_statements(), process_income_sources(), process_expenses(), generate_outputs(), print_summary(). main() is now a ~50-line orchestrator. Also fixed mutable state bug where fitness_ytd was stored on the function object itself — replaced with local variable.
+**Why:** Untestable monolith. Each income source followed the same pattern but was inlined. Adding new income sources (Skool, direct invoices) meant touching a 600-line function. The function-object state was a bug waiting to happen if main() ever ran twice.
+**Impact:** Each stage independently testable. 42 tests still passing. Code went from 1 god-function to 5 focused stages with clear data flow.
+**Decision context:** Highest-impact backlog item. The 596-line main() was flagged in every pocketDEV review.
+
+## 2026-04-04 — Transcriptor v2: Structured logging
+**What changed:** Added logging module across 8 files, 62 logging points. Smart routing: quiet_print() uses a file-only logger (no double console output), direct logger calls go to both file and stream. CLI UI output (progress bars, spinners) stays as print().
+**Why:** 88 print() calls vanishing when run from Task Scheduler. Most complex tool in portfolio with GPU retry logic, multi-threading, diarization — needs persistent logs for debugging.
+**Impact:** All processing steps now logged to backend/transcriptor.log with timestamps and severity.
+**Decision context:** pocketDEV operational assessment flagged Transcriptor as highest-risk for silent failures after Finance.
+
+## 2026-04-04 — UsageBOT: Safe data embedding
+**What changed:** Replaced fragile HTML mutation (lastIndexOf + regex rewriting of index.html) with a separate usage-data.js file. Parser writes data to usage-data.js, index.html loads it via script tag. index.html shrunk from 986KB to 31KB.
+**Why:** The regex on the old approach was greedy and had corrupted index.html during development. String-replacing inside HTML by finding the last script tag is inherently fragile.
+**Impact:** index.html is now stable across parser runs. 46 tests passing. Dashboard works identically.
+**Decision context:** pocketDEV backlog item. High impact, 1 hour effort.
+
+## 2026-04-04 — Backup System: Incremental conversation sync
+**What changed:** Replaced `cp -ru` in backup.sh with Python-based sync-conversations.py. Only copies new/modified files (compares size + mtime). Reports errors individually instead of failing silently. Added 6 tests. Also added Python auto-detection to backup.sh.
+**Why:** cp -ru copied the entire directory tree every time, failed silently on permission errors, and got slower as conversation data grew.
+**Impact:** Incremental sync — skips unchanged files. Errors are visible. 28/28 tests passing.
+**Decision context:** pocketDEV backlog item. The cp -ru failure mode was discovered during the Backup System deep review.
+
 ## 2026-04-04 — Chat Widget: Error handling overhaul
 **What changed:** Fixed 2 empty `catch {}` blocks in vocality-chat.js. Added 10-second timeout and 1-retry with 2s delay on the n8n webhook call. All errors now log with `[VocalityChat]` prefix.
 **Why:** Empty catch blocks were silently swallowing all errors. Users saw a dead widget with no feedback. Webhook had no timeout — a hung request blocked the UI indefinitely.
