@@ -15,7 +15,7 @@ Last updated: 2026-04-04
 **Why:** Storing mutable state on a function object is a subtle bug vector. If `main()` is ever called twice in the same process (tests, multi-year runs), the state persists across calls. A local variable scoped to the loop is cleaner and correct.
 **Added:** 2026-04-04
 
-### [NEW] Add dry-run mode that shows calculated totals without writing files
+### [DONE] Add dry-run mode that shows calculated totals without writing files
 **Impact:** Medium | **Effort:** 1 hour
 **What:** Add `--dry-run` flag to `contabilitate.py`. When set, run the full pipeline (parse, calculate, reconcile) but skip all file writes in the generate_outputs stage (lines 496-584). Print the summary (lines 586-674) as normal.
 **Why:** Right now, every run overwrites the Excel outputs. During the year you often want to check current tax position without regenerating all 8+ Excel files. A dry-run mode lets you query your financial state without side effects.
@@ -43,13 +43,13 @@ Last updated: 2026-04-04
 
 ## Transcriptor v2
 
-### [NEW] Extract diarize-only recovery path into a reusable function
+### [DONE] Extract diarize-only recovery path into a reusable function
 **Impact:** High | **Effort:** 1.5 hours
 **What:** `process_v2.py:856-934` contains a 78-line inline block that duplicates the diarization logic from `process_all()` (lines 558-576). The same pattern — load sidecar JSON, find media file, run diarizer, overwrite transcript — appears in both places with minor variations. Extract into a `DiarizeRecovery` class or a standalone `run_diarize_pass(output_dir, source_dir, config)` function that both code paths call.
 **Why:** The duplicated diarization logic means bugs fixed in one path won't be fixed in the other. The recovery path at line 856 also has a nested loop searching for media files (lines 897-904) that is O(n*m) on directories — a correctness risk if filenames collide across subdirectories.
 **Added:** 2026-04-04
 
-### [NEW] Replace process_all() retry logic with a proper retry decorator
+### [DONE] Replace process_all() retry logic with a proper retry decorator
 **Impact:** Medium | **Effort:** 1 hour
 **What:** `process_v2.py:649-709` has a 60-line retry block that duplicates the per-file-type dispatch logic from `_process_file_wrapper()` (lines 410-430). The retry block manually checks `ft in ('audio', 'video')` and re-dispatches, then does the same for pdf/image/document. Use a retry wrapper (e.g. `tenacity` or a simple custom decorator) on `_process_file_wrapper` with `max_retries=1` and `wait_fixed=1`, eliminating the manual retry queue entirely.
 **Why:** The retry block duplicates dispatch logic, which means adding a new file type requires changes in three places: `_process_file_wrapper`, the retry block, and `type_map`. A decorator-based retry collapses this to one place.
@@ -63,13 +63,13 @@ Last updated: 2026-04-04
 **Why:** The current approach has destroyed the index.html structure at least once during development (the regex on line 602 is greedy with `[\s\S]*?`). A separate data file eliminates the mutation risk entirely and makes the HTML stable across runs.
 **Added:** 2026-04-04
 
-### [NEW] Add cost tracking for new model tiers (Opus 4, extended thinking)
+### [DONE] Add cost tracking for new model tiers (Opus 4, extended thinking)
 **Impact:** Medium | **Effort:** 30 minutes
 **What:** `parse-claude-data.js:20-24` hardcodes cost rates for opus/sonnet/haiku. The `classifyModel()` function at line 29 only checks for these three strings. Add classification for `opus-4` (which may have different pricing), and add an `unknown` cost tier that defaults to sonnet pricing but flags sessions using unrecognized models in the output JSON.
 **Why:** As Anthropic releases new models, sessions using them will silently get classified as "unknown" with zero cost attribution. The dashboard will undercount spending. A fallback rate + a warning field ensures cost estimates stay accurate even before the parser is updated.
 **Added:** 2026-04-04
 
-### [NEW] Add date range filtering to avoid re-parsing all history
+### [DONE] Add date range filtering to avoid re-parsing all history
 **Impact:** Medium | **Effort:** 45 minutes
 **What:** `parse-claude-data.js:417-527` parses every JSONL file in `~/.claude/projects/` on every run. Add `--since YYYY-MM-DD` and `--until YYYY-MM-DD` flags that skip JSONL files whose mtime falls outside the range. For incremental updates, add `--incremental` that reads the previous `usage-stats.json`, only parses files modified since `generatedAt`, and merges the new sessions.
 **Why:** With months of accumulated conversation data, the full parse takes 10+ seconds and will only get slower. Most dashboard refreshes only need the last day's data. Incremental parsing would bring refresh time under 1 second.
@@ -83,7 +83,7 @@ Last updated: 2026-04-04
 **Why:** The parallel extraction pipeline (`--parallel 3-4`) is likely to hit rate limits. Currently a rate-limited request is recorded as a permanent failure that requires `--retry-failed` to recover. Automatic backoff would let a batch run complete without manual intervention.
 **Added:** 2026-04-04
 
-### [NEW] Validate and repair JSON output before saving
+### [DONE] Validate and repair JSON output before saving
 **Impact:** Medium | **Effort:** 30 minutes
 **What:** `extract.py:293-301` strips markdown fences and parses JSON, but Claude sometimes returns truncated JSON (especially for long transcripts near the output token limit). Add a JSON repair step: if `json.loads()` fails, try closing unclosed brackets/braces and re-parsing. Also validate that the parsed JSON contains the expected top-level keys (`metadata`, `technical_corrections`, etc.) and log a warning if any are missing.
 **Why:** Currently a truncated JSON response from Claude causes the extraction to be marked as failed, losing all the valid content that was returned. A repair step salvages partial results. Key validation catches prompt drift (Claude changing the schema) early.
@@ -135,7 +135,7 @@ Last updated: 2026-04-04
 **Why:** React apps without error boundaries have zero crash resilience. One bad state in any component takes down everything.
 **Added:** 2026-04-04
 
-### [NEW] Add retry with backoff to Preply Messenger send operations
+### [DONE] Add retry with backoff to Preply Messenger send operations
 **Impact:** Medium | **Effort:** 1 hour
 **What:** `src/messenger.js` sends messages via Playwright page interactions with no retry on failure. If a page navigation times out or an element selector fails, the message is lost. Add retry logic (3 attempts, 5s/10s/20s backoff) around the send operation. Log failures to `logs/activity.log` (structured logging already exists in this repo).
 **Why:** Network blips or Preply UI changes cause transient failures. Currently these are permanent failures requiring manual re-run. Retry with backoff would handle the common case automatically.

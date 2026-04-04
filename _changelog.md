@@ -3,6 +3,36 @@
 Narrative log of every change made to the tool portfolio, with reasoning and decision context.
 Reverse chronological order. One entry per logical change.
 
+## 2026-04-04 — Finance: Add dry-run mode
+**What changed:** Added `--dry-run` flag to contabilitate.py. Runs full pipeline (parse, calculate, reconcile) but skips all file writes. Summary still prints to terminal.
+**Why:** Every run overwrites 8+ Excel files. During the year you often want to check tax position without regenerating all output.
+**Impact:** Can query financial state without side effects. 42 tests passing.
+**Decision context:** pocketDEV backlog item. Medium impact, 1 hour effort.
+
+## 2026-04-04 — Transcriptor v2: Extract diarize recovery + simplify retry
+**What changed:** Extracted 78-line inline diarize recovery block into standalone `run_diarize_pass()` function. Extracted file-type dispatch into `_dispatch_file()` method, collapsing 60-line manual retry block to 15 lines.
+**Why:** Duplicated diarization logic meant bugs fixed in one path wouldn't be fixed in the other. Retry block duplicated dispatch logic — adding a new file type required changes in three places.
+**Impact:** Single source of truth for both diarization and file dispatch. Adding new file types now requires one change instead of three.
+**Decision context:** pocketDEV backlog items. High + Medium impact.
+
+## 2026-04-04 — UsageBOT: Model tier detection + date filtering
+**What changed:** Extended classifyModel() with regex patterns for versioned model names (opus-4, sonnet-4 etc.). Added unknownModels field to output JSON. Added --since/--until CLI flags that skip JSONL files by mtime.
+**Why:** New model releases would silently get zero cost attribution. Full parse of all history takes 10+ seconds and growing. --since cuts this to under 1 second for daily refreshes.
+**Impact:** Future-proof model detection. Incremental parsing viable. 46 tests passing.
+**Decision context:** pocketDEV backlog items. Medium impact each.
+
+## 2026-04-04 — Skool: JSON output validation and repair
+**What changed:** Added JSON repair step in extract.py — when json.loads() fails, attempts to close unclosed brackets/braces and re-parse. Added validation of 8 expected top-level keys. Logs warnings for repairs and missing keys.
+**Why:** Claude sometimes returns truncated JSON near the output token limit. Previously this was a permanent failure losing all valid content. Repair step salvages partial results.
+**Impact:** Batch extractions recover from truncated responses automatically.
+**Decision context:** pocketDEV backlog item. Medium impact, 30 min effort.
+
+## 2026-04-04 — Preply Messenger: Retry with backoff on sends
+**What changed:** Wrapped message send operation in messenger.js with retry loop: 3 attempts at 5s/10s/20s delays. Each failure logged via structured logger with attempt number and backoff duration.
+**Why:** Network blips or Preply UI changes cause transient failures. Previously permanent, requiring manual re-run.
+**Impact:** Transient send failures handled automatically. Structured log trail for debugging.
+**Decision context:** pocketDEV operational assessment. Medium impact, 1 hour effort.
+
 ## 2026-04-04 — Finance: Extract main() into pipeline stages
 **What changed:** Split 596-line main() in contabilitate.py into 5 named functions: parse_bank_statements(), process_income_sources(), process_expenses(), generate_outputs(), print_summary(). main() is now a ~50-line orchestrator. Also fixed mutable state bug where fitness_ytd was stored on the function object itself — replaced with local variable.
 **Why:** Untestable monolith. Each income source followed the same pattern but was inlined. Adding new income sources (Skool, direct invoices) meant touching a 600-line function. The function-object state was a bug waiting to happen if main() ever ran twice.
