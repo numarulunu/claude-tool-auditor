@@ -6,12 +6,18 @@ Modes:
     audit                        Health scan across all discovered repos
     review <tool>                Deep code quality dive into one tool
     diagnose <tool>              Gather diagnostic info when something's broken
+    snapshot                     Generate structured JSON snapshot of all repos
+    backlog list [--status X]    List backlog entries, optionally filtered
+    backlog stats                Show backlog counts by status and tool
 
 Usage:
     python pocketdev.py audit                         # Scan all repos
     python pocketdev.py audit --tool "Finance"        # Filter by name
     python pocketdev.py review "Finance"              # Deep review one tool
     python pocketdev.py diagnose "Transcriptor"       # Diagnose a broken tool
+    python pocketdev.py snapshot --output snap.json   # Parallel snapshot
+    python pocketdev.py backlog list --status NEW     # Open backlog items
+    python pocketdev.py backlog stats                 # Backlog summary
     python pocketdev.py --scan-dir ~/Projects audit   # Custom scan directory
 """
 
@@ -21,6 +27,8 @@ import re
 import subprocess
 import sys
 import argparse
+import time
+import concurrent.futures
 from datetime import datetime, timezone
 from pathlib import Path
 from collections import Counter
@@ -102,8 +110,22 @@ CONSOLE_LOG_PATTERN = re.compile(r"\bconsole\.(log|debug|info|warn|error)\b")
 COMMENTED_CODE_PATTERN = re.compile(r"^\s*//\s*(if|for|while|return|const|let|var|function|class|import|def |async )")
 
 
-def run_cmd(cmd, timeout=30, cwd=None):
-    """Run a command and return (exit_code, stdout, stderr)."""
+# Git subprocess result cache: {(repo_dir, command_tuple): (result, timestamp)}
+_git_cache = {}
+_GIT_CACHE_TTL = 60  # seconds
+
+
+def run_cmd(cmd, timeout=30, cwd=None, cache_key=None):
+    """Run a command and return (exit_code, stdout, stderr).
+
+    If cache_key is provided, results are cached for _GIT_CACHE_TTL seconds.
+    cache_key should be a hashable value, typically (cwd, tuple(cmd)).
+    """
+    if cache_key is not None and cache_key in _git_cache:
+        result, ts = _git_cache[cache_key]
+        if time.monotonic() - ts < _GIT_CACHE_TTL:
+            return result
+
     try:
         if isinstance(cmd, str):
             r = subprocess.run(cmd, shell=True, capture_output=True, text=True,
@@ -111,11 +133,16 @@ def run_cmd(cmd, timeout=30, cwd=None):
         else:
             r = subprocess.run(cmd, capture_output=True, text=True,
                                timeout=timeout, cwd=cwd)
-        return r.returncode, r.stdout.strip(), r.stderr.strip()
+        result = (r.returncode, r.stdout.strip(), r.stderr.strip())
     except subprocess.TimeoutExpired:
-        return -1, "", "TIMEOUT"
+        result = (-1, "", "TIMEOUT")
     except Exception as e:
-        return -1, "", str(e)
+        result = (-1, "", str(e))
+
+    if cache_key is not None:
+        _git_cache[cache_key] = (result, time.monotonic())
+
+    return result
 
 
 def find_git_repos(scan_dirs, max_depth=4):
@@ -267,11 +294,14 @@ def audit_repo(repo):
         ).strftime("%Y-%m-%d %H:%M UTC")
 
     # --- Git status ---
-    code, stdout, _ = run_cmd(["git", "status", "--porcelain"], cwd=repo["dir"])
+    rd = repo["dir"]
+    code, stdout, _ = run_cmd(["git", "status", "--porcelain"], cwd=rd,
+                               cache_key=(rd, ("git", "status", "--porcelain")))
     if code == 0 and stdout:
         result["stats"]["uncommitted"] = len(stdout.split("\n"))
 
-    code, stdout, _ = run_cmd(["git", "log", "--oneline", "@{u}..HEAD"], cwd=repo["dir"])
+    code, stdout, _ = run_cmd(["git", "log", "--oneline", "@{u}..HEAD"], cwd=rd,
+                               cache_key=(rd, ("git", "log", "--oneline", "@{u}..HEAD")))
     if code == 0 and stdout:
         result["stats"]["unpushed"] = len(stdout.split("\n"))
 
@@ -313,7 +343,8 @@ def detect_tests(d):
 
 def get_tracked_files(repo_dir):
     """Get set of git-tracked file paths (posix-style)."""
-    code, stdout, _ = run_cmd(["git", "ls-files"], cwd=repo_dir)
+    code, stdout, _ = run_cmd(["git", "ls-files"], cwd=repo_dir,
+                               cache_key=(repo_dir, ("git", "ls-files")))
     return set(stdout.splitlines()) if code == 0 else set()
 
 
@@ -1216,35 +1247,40 @@ def snapshot_repo(repo):
 
     # --- Git info ---
     git_info = {}
+    rd = repo["dir"]
 
-    code, stdout, _ = run_cmd(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo["dir"])
+    code, stdout, _ = run_cmd(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=rd,
+                               cache_key=(rd, ("git", "rev-parse", "--abbrev-ref", "HEAD")))
     git_info["branch"] = stdout if code == 0 else None
 
     code, stdout, _ = run_cmd(
         ["git", "log", "--oneline", "--since=30 days ago", "--no-merges"],
-        cwd=repo["dir"]
+        cwd=rd, cache_key=(rd, ("git", "log", "--oneline", "--since=30 days ago", "--no-merges"))
     )
     git_info["commits_30d"] = len(stdout.splitlines()) if code == 0 and stdout else 0
 
     code, stdout, _ = run_cmd(
         ["git", "log", "-1", "--format=%aI"],
-        cwd=repo["dir"]
+        cwd=rd, cache_key=(rd, ("git", "log", "-1", "--format=%aI"))
     )
     git_info["last_commit_date"] = stdout if code == 0 and stdout else None
 
     code, stdout, _ = run_cmd(
         ["git", "log", "-1", "--format=%s"],
-        cwd=repo["dir"]
+        cwd=rd, cache_key=(rd, ("git", "log", "-1", "--format=%s"))
     )
     git_info["last_commit_msg"] = stdout if code == 0 and stdout else None
 
-    code, stdout, _ = run_cmd(["git", "status", "--porcelain"], cwd=repo["dir"])
+    code, stdout, _ = run_cmd(["git", "status", "--porcelain"], cwd=rd,
+                               cache_key=(rd, ("git", "status", "--porcelain")))
     git_info["uncommitted"] = len(stdout.splitlines()) if code == 0 and stdout else 0
 
-    code, stdout, _ = run_cmd(["git", "log", "--oneline", "@{u}..HEAD"], cwd=repo["dir"])
+    code, stdout, _ = run_cmd(["git", "log", "--oneline", "@{u}..HEAD"], cwd=rd,
+                               cache_key=(rd, ("git", "log", "--oneline", "@{u}..HEAD")))
     git_info["unpushed"] = len(stdout.splitlines()) if code == 0 and stdout else 0
 
-    code, stdout, _ = run_cmd(["git", "rev-list", "--count", "HEAD..@{u}"], cwd=repo["dir"])
+    code, stdout, _ = run_cmd(["git", "rev-list", "--count", "HEAD..@{u}"], cwd=rd,
+                               cache_key=(rd, ("git", "rev-list", "--count", "HEAD..@{u}")))
     git_info["behind_remote"] = int(stdout.strip()) if code == 0 and stdout.strip().isdigit() else 0
 
     snap["git"] = git_info
@@ -1363,12 +1399,16 @@ def snapshot_repo(repo):
     return snap
 
 
+def _snapshot_one(repo):
+    """Snapshot a single repo and print progress. Used by ThreadPoolExecutor."""
+    print(f"  Snapshotting {repo['name']}...", file=sys.stderr)
+    return snapshot_repo(repo)
+
+
 def snapshot_all(repos):
-    """Generate a full snapshot across all repos."""
-    snapshots = []
-    for repo in repos:
-        print(f"  Snapshotting {repo['name']}...", file=sys.stderr)
-        snapshots.append(snapshot_repo(repo))
+    """Generate a full snapshot across all repos (parallelized)."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        snapshots = list(pool.map(_snapshot_one, repos))
 
     total_loc = sum(s.get("files", {}).get("total_loc", 0) for s in snapshots)
     repos_with_tests = sum(1 for s in snapshots if s.get("tests", {}).get("has_tests"))
@@ -1397,6 +1437,89 @@ def snapshot_all(repos):
         },
         "repos": snapshots,
     }
+
+
+# ---------------------------------------------------------------------------
+# Backlog
+# ---------------------------------------------------------------------------
+
+_BACKLOG_ENTRY_RE = re.compile(
+    r"^###\s+\[(?P<status>[A-Z]+)\]\s+(?P<title>.+)$"
+)
+_BACKLOG_TOOL_RE = re.compile(r"^##\s+(?P<tool>.+)$")
+
+
+def parse_backlog(backlog_path=None):
+    """Parse _backlog.md into a list of entry dicts."""
+    if backlog_path is None:
+        backlog_path = Path(__file__).parent / "_backlog.md"
+    else:
+        backlog_path = Path(backlog_path)
+
+    if not backlog_path.exists():
+        return []
+
+    text = backlog_path.read_text(encoding="utf-8")
+    entries = []
+    current_tool = None
+
+    for line in text.splitlines():
+        tool_m = _BACKLOG_TOOL_RE.match(line)
+        if tool_m:
+            current_tool = tool_m.group("tool").strip()
+            continue
+
+        entry_m = _BACKLOG_ENTRY_RE.match(line)
+        if entry_m:
+            entries.append({
+                "tool": current_tool or "Unknown",
+                "status": entry_m.group("status"),
+                "title": entry_m.group("title").strip(),
+            })
+
+    return entries
+
+
+def backlog_list(entries, status_filter=None):
+    """Print backlog entries grouped by tool, optionally filtered by status."""
+    if status_filter:
+        entries = [e for e in entries if e["status"].upper() == status_filter.upper()]
+
+    if not entries:
+        print("No backlog entries found.")
+        return
+
+    by_tool = {}
+    for e in entries:
+        by_tool.setdefault(e["tool"], []).append(e)
+
+    for tool, items in by_tool.items():
+        print(f"\n{tool}")
+        print("-" * len(tool))
+        for item in items:
+            print(f"  [{item['status']}] {item['title']}")
+
+    print(f"\nTotal: {len(entries)} entries")
+
+
+def backlog_stats(entries):
+    """Print backlog statistics by status and tool."""
+    if not entries:
+        print("No backlog entries found.")
+        return
+
+    status_counts = Counter(e["status"] for e in entries)
+    tool_counts = Counter(e["tool"] for e in entries)
+
+    print("\nBy status:")
+    for status, count in status_counts.most_common():
+        print(f"  [{status}] {count}")
+
+    print(f"\nBy tool:")
+    for tool, count in tool_counts.most_common():
+        print(f"  {tool}: {count}")
+
+    print(f"\nTotal: {len(entries)} entries")
 
 
 # ---------------------------------------------------------------------------
@@ -1437,11 +1560,31 @@ def main():
     p_snapshot.add_argument("--output", type=str, default=None,
                            help="Write snapshot to file (default: stdout)")
 
+    # backlog
+    p_backlog = subparsers.add_parser("backlog", help="Manage the improvement backlog")
+    backlog_sub = p_backlog.add_subparsers(dest="backlog_action", help="Backlog action")
+    p_bl_list = backlog_sub.add_parser("list", help="List backlog entries")
+    p_bl_list.add_argument("--status", type=str, default=None,
+                           help="Filter by status (e.g. NEW, DONE, APPROVED)")
+    backlog_sub.add_parser("stats", help="Show backlog statistics")
+
     args = parser.parse_args()
 
     if not args.mode:
         parser.print_help()
         sys.exit(1)
+
+    # Handle backlog before repo scanning (doesn't need repos)
+    if args.mode == "backlog":
+        entries = parse_backlog()
+        if not hasattr(args, 'backlog_action') or not args.backlog_action:
+            p_backlog.print_help()
+            sys.exit(1)
+        if args.backlog_action == "list":
+            backlog_list(entries, status_filter=args.status)
+        elif args.backlog_action == "stats":
+            backlog_stats(entries)
+        sys.exit(0)
 
     scan_dirs = args.scan_dir or [
         os.path.expanduser("~/Desktop"),
