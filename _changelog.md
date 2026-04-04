@@ -3,6 +3,24 @@
 Narrative log of every change made to the tool portfolio, with reasoning and decision context.
 Reverse chronological order. One entry per logical change.
 
+## 2026-04-04 — Transcriptor v2: Test suite (98 tests)
+**What changed:** Created 5 test files covering 6 source modules: config loading (20 tests), process_v2 dispatch/retry/paths (34 tests), document processor (11 tests), processing calculator (21 tests), quiet mode (12 tests). All GPU/whisper dependencies fully mocked.
+**Why:** Most complex tool in portfolio had zero tests. GPU retry, multi-threading, file dispatch, and diarization recovery were all untested.
+**Impact:** 98 tests passing in 0.8s. Core logic now has regression protection without needing GPU hardware.
+**Decision context:** pocketDEV operational assessment flagged this as the most dangerous gap. 4-6 hour estimate, done in one agent dispatch.
+
+## 2026-04-04 — pocketDEV: Parallel snapshot + backlog CLI + git cache
+**What changed:** snapshot_all() now uses ThreadPoolExecutor (4 workers) — 14.5s→6.5s (2.2x). New `backlog list` and `backlog stats` subcommands parse _backlog.md. Git subprocess results cached for 60s across modes.
+**Why:** Snapshot was bottlenecked by sequential git commands. Backlog needed CLI access for automation. Git commands were duplicated across modes.
+**Impact:** Snapshot viable as pre-conversation hook. Backlog queryable from scripts.
+**Decision context:** Final 3 pocketDEV self-improvement backlog items, all low-medium effort.
+
+## 2026-04-04 — Backup System: Digest deduplication + token counts
+**What changed:** Added .last_sync mechanism — projects with no new JSONL data are skipped on daily runs. Added --force flag to bypass. Digests now include per-session and project-level token counts (input/output) extracted from the usage field in assistant messages. 13 new tests, 41/41 passing.
+**Why:** Daily digest rebuilt all projects even when most were unchanged. Token counts let the memory sync protocol prioritize heavy sessions over lightweight ones.
+**Impact:** Daily backup faster (skips unchanged projects). Digest metadata richer.
+**Decision context:** Final 2 Backup System backlog items.
+
 ## 2026-04-04 — Finance: Add dry-run mode
 **What changed:** Added `--dry-run` flag to contabilitate.py. Runs full pipeline (parse, calculate, reconcile) but skips all file writes. Summary still prints to terminal.
 **Why:** Every run overwrites 8+ Excel files. During the year you often want to check tax position without regenerating all output.

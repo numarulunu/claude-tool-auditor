@@ -29,13 +29,13 @@ Last updated: 2026-04-04
 **Why:** The current approach has failed silently in the past (the `log_warn` on line 89 catches the exit code but not partial failures). With conversation files growing over time, a proper incremental sync avoids copying gigabytes of unchanged JSONL files.
 **Added:** 2026-04-04
 
-### [NEW] Add digest deduplication — skip projects with no new conversations
+### [DONE] Add digest deduplication — skip projects with no new conversations
 **Impact:** Medium | **Effort:** 45 minutes
 **What:** `memory-sync.py:290-340` iterates every project directory and rebuilds the full digest even when no new JSONL data exists since the last run. Add a `.last_sync` timestamp file per project. On each run, compare JSONL mtimes against `.last_sync` and skip projects with no changes. Only rebuild digests for projects with new conversation data.
 **Why:** The daily digest currently regenerates all projects every time, which takes 5-10 seconds and produces identical output for inactive projects. With 11+ projects, most are unchanged on any given day. Skipping unchanged projects makes the daily backup faster and the manifest more meaningful (only listing projects with new data).
 **Added:** 2026-04-04
 
-### [NEW] Add conversation token/message counts to digest metadata
+### [DONE] Add conversation token/message counts to digest metadata
 **Impact:** Low | **Effort:** 30 minutes
 **What:** `memory-sync.py:173-202` builds digest headers with conversation count and date range but no token-level stats. Parse the `usage` field from assistant messages (already available in the JSONL) and add per-session token counts (input, output, cache) to each session header. Add total token count to the project header.
 **Why:** The digest is consumed by the memory sync protocol, which needs to decide how much context to pull. Token counts let it prioritize heavy sessions (where real work happened) over lightweight ones (quick questions). Currently it has no signal for session weight.
@@ -91,19 +91,19 @@ Last updated: 2026-04-04
 
 ## pocketDEV
 
-### [NEW] Parallelize snapshot mode across repos
+### [DONE] Parallelize snapshot mode across repos
 **Impact:** Medium | **Effort:** 45 minutes
 **What:** `pocketdev.py:1366-1372` (`snapshot_all`) processes repos sequentially. Each repo runs 6+ git commands and reads all tracked files. Use `concurrent.futures.ThreadPoolExecutor` to snapshot repos in parallel (4-6 workers). The `snapshot_repo()` function is already stateless — it takes a repo dict and returns a snapshot dict — so parallelization is safe.
 **Why:** With 11 repos, the sequential snapshot takes 15-20 seconds (mostly git subprocess overhead). Parallel execution would cut this to ~5 seconds, making the daily snapshot viable as a pre-conversation hook.
 **Added:** 2026-04-04
 
-### [NEW] Add `backlog` subcommand to manage this file programmatically
+### [DONE] Add `backlog` subcommand to manage this file programmatically
 **Impact:** Medium | **Effort:** 1.5 hours
 **What:** Add `pocketdev.py backlog list`, `backlog add --tool "X" --title "Y"`, `backlog resolve <id>`, `backlog stats` subcommands. Parse `_backlog.md` as structured data (regex on the existing heading/field format). `resolve` moves an item from `[NEW]` to `[DONE]` with a completion date. `stats` shows counts by tool and status.
 **Why:** Currently the backlog is a manual markdown file. As it grows, finding open items, tracking completion, and preventing duplicates requires reading the whole file. A CLI interface makes the backlog actionable from automation (e.g. "show me open items for Finance" in a pre-session hook).
 **Added:** 2026-04-04
 
-### [NEW] Cache git data between audit/review/snapshot modes
+### [DONE] Cache git data between audit/review/snapshot modes
 **Impact:** Low | **Effort:** 30 minutes
 **What:** `pocketdev.py` runs `git ls-files`, `git status --porcelain`, `git log` etc. independently in `audit_repo()`, `snapshot_repo()`, and `review_repo()`. If multiple modes are run in sequence (e.g. snapshot then audit), the same git commands run twice. Add a simple `GitCache` class that memoizes subprocess results by `(repo_dir, command_tuple)` with a 60-second TTL.
 **Why:** Minor optimization, but it matters when running the full suite across 11 repos. Each repo currently runs 8-10 git commands per mode. Caching across modes would halve the subprocess count.
@@ -117,7 +117,7 @@ Last updated: 2026-04-04
 **Why:** When run from Task Scheduler or background processes, `print()` output vanishes. These are the two tools where silent failures cost real money (Finance) or real time (Transcriptor). Structured logs with timestamps are essential for debugging scheduled runs.
 **Added:** 2026-04-04
 
-### [NEW] Add tests to Transcriptor v2
+### [DONE] Add tests to Transcriptor v2
 **Impact:** High | **Effort:** 4-6 hours
 **What:** Zero test files exist for a tool with GPU retry logic (`_transcribe_with_retry`), multi-threaded processing, diarization recovery, and API endpoints. Priority test targets: (1) `_transcribe_with_retry` — mock whisper, verify retry on OOM, (2) file type dispatch in `_process_file_wrapper`, (3) diarization recovery path at `process_v2.py:856-934`, (4) API route handlers.
 **Why:** Most complex tool in the portfolio with the highest failure surface area. GPU OOM recovery, file format detection, and multi-threading are all untested. A regression here means hours of re-processing.
