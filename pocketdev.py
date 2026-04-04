@@ -1687,7 +1687,7 @@ def release_electron(repo, bump_type="patch", notes=None):
     # Step 3: Build the installer
     print(f"[release] Building installer...", file=sys.stderr)
     code, stdout, stderr = run_cmd(
-        ["npm", "run", "build"],
+        "npm run build",
         cwd=str(electron_dir),
         timeout=600
     )
@@ -1735,15 +1735,14 @@ def release_electron(repo, bump_type="patch", notes=None):
     # Step 7: Publish to GitHub Releases
     print(f"[release] Publishing v{new_version} to GitHub...", file=sys.stderr)
 
+    # Create release with small files first (yml, blockmap)
     gh_args = ["gh", "release", "create", f"v{new_version}",
                "--title", f"v{new_version}",
                "--notes", notes]
 
-    # Attach artifacts
-    gh_args.append(str(installer))
-    for f in blockmap_files:
-        gh_args.append(str(f))
     for f in yml_files:
+        gh_args.append(str(f))
+    for f in blockmap_files:
         gh_args.append(str(f))
 
     code, stdout, stderr = run_cmd(gh_args, cwd=repo["dir"], timeout=120)
@@ -1751,7 +1750,18 @@ def release_electron(repo, bump_type="patch", notes=None):
         print(f"[release] ERROR: GitHub release failed:\n{stderr}", file=sys.stderr)
         return False
 
-    print(f"[release] Published: {stdout}", file=sys.stderr)
+    print(f"[release] Release created: {stdout}", file=sys.stderr)
+
+    # Upload the large installer separately (gh release create can silently drop large files)
+    print(f"[release] Uploading installer ({installer.stat().st_size // 1024 // 1024}MB)...", file=sys.stderr)
+    code, stdout, stderr = run_cmd(
+        ["gh", "release", "upload", f"v{new_version}", str(installer), "--clobber"],
+        cwd=repo["dir"], timeout=600
+    )
+    if code != 0:
+        print(f"[release] WARNING: Installer upload failed: {stderr}", file=sys.stderr)
+    else:
+        print(f"[release] Installer uploaded.", file=sys.stderr)
     print(f"[release] Users with the app installed will get this update automatically.", file=sys.stderr)
     return True
 
