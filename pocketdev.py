@@ -42,6 +42,10 @@ SKIP_DIRS = {".git", "node_modules", "__pycache__", "venv", ".venv", "dist",
              "build", ".next", ".nuxt", "coverage", ".tox", "egg-info",
              "_digests", "_conversations"}
 
+# Directories containing vendored/third-party code — skip in security scans
+VENDORED_DIRS = {"node_modules", "site-packages", ".venv", "venv", "__pycache__",
+                 "vendor", "third_party", "external", "dist", "build"}
+
 # Repos to skip during discovery (parent/meta repos that aren't standalone tools)
 EXCLUDE_REPOS = {"claude-backup"}
 
@@ -101,9 +105,13 @@ PII_PATTERNS = [
 ]
 
 # Files where PII is expected/acceptable (don't flag these)
-PII_IGNORE_FILES = {"package.json", "package-lock.json", "yarn.lock", "LICENSE",
-                     "CONTRIBUTORS", "AUTHORS", ".mailmap", "pyproject.toml",
-                     "setup.cfg", "setup.py"}
+PII_IGNORE_FILES = {"package.json", "package-lock.json", "yarn.lock",
+                     "license", "license.txt", "license.md",
+                     "licence", "licence.txt", "licence.md",
+                     "notice", "notice.txt", "notice.md",
+                     "contributors", "authors", ".mailmap", "pyproject.toml",
+                     "setup.cfg", "setup.py", "_changelog.md",
+                     "activity-feed.json"}
 
 TODO_PATTERN = re.compile(r"\b(TODO|FIXME|HACK|XXX|WORKAROUND|TEMP|KLUDGE)\b", re.IGNORECASE)
 CONSOLE_LOG_PATTERN = re.compile(r"\bconsole\.(log|debug|info|warn|error)\b")
@@ -215,6 +223,25 @@ def find_git_repos(scan_dirs, max_depth=4):
                 if not has_child_repos:
                     dirs.clear()
 
+    # Filter out child repos whose parent is already in the list
+    # (e.g. AutoPipeline/electron/ when AutoPipeline/ is already scanned)
+    repo_dirs = {r["dir"] for r in repos}
+    filtered = []
+    for r in repos:
+        is_child = False
+        check = str(Path(r["dir"]).parent)
+        while check:
+            if check in repo_dirs:
+                is_child = True
+                break
+            new_check = str(Path(check).parent)
+            if new_check == check:
+                break
+            check = new_check
+        if not is_child:
+            filtered.append(r)
+    repos = filtered
+
     return sorted(repos, key=lambda r: r["name"].lower())
 
 
@@ -241,6 +268,12 @@ def read_file_safe(path, max_bytes=512_000):
         return path.read_text(encoding="utf-8", errors="replace")
     except (OSError, UnicodeDecodeError):
         return None
+
+
+def is_vendored_path(filepath_str):
+    """Check if a file path is inside a vendored/third-party directory."""
+    parts = Path(filepath_str).parts
+    return any(part in VENDORED_DIRS for part in parts)
 
 
 def match_repo(repos, name):
@@ -405,7 +438,13 @@ def detect_tests(d):
             scripts = pkg.get("scripts", {})
             if "test" in scripts and "no test specified" not in scripts["test"]:
                 info["has_tests"] = True
-                info["framework"] = "npm test"
+                test_cmd = scripts["test"]
+                # Detect Vitest vs Jest/other
+                deps = {**pkg.get("devDependencies", {}), **pkg.get("dependencies", {})}
+                if "vitest" in test_cmd or "vitest" in deps:
+                    info["framework"] = "vitest"
+                else:
+                    info["framework"] = "npm test"
         except (json.JSONDecodeError, OSError):
             pass
 
@@ -440,6 +479,9 @@ def find_issues(repo, d, all_files):
         if fname in SENSITIVE_FILES:
             issues["critical"].append(f"SECRET FILE TRACKED: `{tf}` — remove from git immediately")
         if Path(tf).suffix.lower() in SENSITIVE_EXTENSIONS:
+            # CA certificate bundles are public data, not secrets
+            if "cacert" in fname or "ca-bundle" in fname or "ca-certificates" in fname:
+                continue
             issues["critical"].append(f"KEY FILE TRACKED: `{tf}` — private key in git")
 
     # Scan tracked source files for secrets
@@ -502,7 +544,8 @@ def find_issues(repo, d, all_files):
 
     # Electron app without auto-updater
     # (Desktop apps should update themselves — users shouldn't have to reinstall manually)
-    electron_pkgs = list(d.rglob("package.json"))
+    electron_pkgs = [p for p in d.rglob("package.json")
+                     if not is_vendored_path(str(p.relative_to(d)))]
     for pkg_path in electron_pkgs:
         try:
             pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
@@ -541,6 +584,14 @@ def scan_secrets(repo_dir, d, tracked):
     """Scan all tracked source files for hardcoded secrets."""
     hits = []
     for tf in tracked:
+        if is_vendored_path(tf):
+            continue
+        # Skip test files — they intentionally contain fake secret patterns
+        tf_name = Path(tf).name.lower()
+        if tf_name.startswith("test_") or tf_name.endswith("_test.py") or \
+           tf_name.endswith(".test.js") or tf_name.endswith(".test.ts") or \
+           tf_name.endswith(".spec.js") or tf_name.endswith(".spec.ts"):
+            continue
         fpath = d / tf.replace("/", os.sep)
         if not fpath.is_file():
             continue
@@ -585,8 +636,19 @@ def scan_pii(repo_dir, d, tracked):
                  ".py", ".js", ".ts", ".sh", ".html", ".yml", ".yaml"}
 
     for tf in tracked:
+        if is_vendored_path(tf):
+            continue
         fname = Path(tf).name.lower()
         if fname in PII_IGNORE_FILES:
+            continue
+        # Skip test files — they contain intentional fake PII for testing
+        if fname.startswith("test_") or fname.endswith("_test.py") or \
+           fname.endswith(".test.js") or fname.endswith(".test.ts") or \
+           fname.endswith(".spec.js") or fname.endswith(".spec.ts"):
+            continue
+        # Skip docs/plans/specs — these are internal design docs, not shipped code
+        tf_parts = Path(tf).parts
+        if "docs" in tf_parts or "plans" in tf_parts or "specs" in tf_parts:
             continue
         fpath = d / tf.replace("/", os.sep)
         if not fpath.is_file():
@@ -668,6 +730,10 @@ def scan_history(repo_dir):
         if code == 0 and stdout.strip():
             files = [f for f in stdout.strip().splitlines() if f.strip()]
             for f in files[:3]:
+                # CA certificate bundles are public data, not secrets
+                f_lower = Path(f).name.lower()
+                if "cacert" in f_lower or "ca-bundle" in f_lower or "ca-certificates" in f_lower:
+                    continue
                 issues.append(f"HISTORY: Key file `{f}` was committed — may need history rewrite")
 
     # Check for large binary files in history (>10MB that are no longer tracked)
@@ -704,9 +770,23 @@ def run_tests(d, tests_info):
         output = (stdout + "\n" + stderr).strip()
         return {"ran": True, "passed": code == 0, "output": output[-500:]}
 
-    elif tests_info["framework"] == "npm test":
+    elif tests_info["framework"] == "vitest":
+        # Vitest: use --run to run once and exit (not --watchAll which is Jest-only)
+        import shutil
+        npx_cmd = shutil.which("npx") or "npx"
         code, stdout, stderr = run_cmd(
-            ["npm", "test", "--", "--watchAll=false"],
+            [npx_cmd, "vitest", "run"],
+            cwd=str(d), timeout=120
+        )
+        output = (stdout + "\n" + stderr).strip()
+        return {"ran": True, "passed": code == 0, "output": output[-500:]}
+
+    elif tests_info["framework"] == "npm test":
+        # Jest/generic: use --watchAll=false to run once
+        import shutil
+        npm_cmd = shutil.which("npm") or "npm"
+        code, stdout, stderr = run_cmd(
+            [npm_cmd, "test", "--", "--watchAll=false"],
             cwd=str(d), timeout=120
         )
         output = (stdout + "\n" + stderr).strip()
