@@ -3,6 +3,29 @@
 Narrative log of every change made to the tool portfolio, with reasoning and decision context.
 Reverse chronological order. One entry per logical change.
 
+## 2026-04-05 — PFA Contabilitate: Claude Verification + Auto-updater + Folder Picker
+**What changed:** Added "Verifica" button that sends calculation results + legislation + tax strategies to Claude for cross-checking. Added auto-updater (electron-updater). Added first-run folder picker so users choose their data directory. Fixed Python bundling (extraResources not files). Fixed claude CLI path resolution for packaged apps. Fixed stdin piping (execFile + stdin.write instead of shell redirect). Switched to one-click NSIS installer. Removed duplicate Import button. Released v1.0.1 through v1.2.5.
+**Why:** User wants a pocket accountant, not just a calculator. The verification found a real error (amortization_threshold 2500 should be 5000 for 2026+ purchases per OUG 8/2026) and 13 unused tax strategies worth ~12,900 RON/year.
+**Impact:** Claude now actively audits tax calculations against legislation. First step toward autonomous accountant.
+**Decision context:** User vision: "I want it 100x better than an average accountant and 1000x faster. A pocket accountant that reads the law, organizes documents, fills declarations, and keeps everything current."
+
+## 2026-04-05 — Claude HUD: Metin2 Grind + Dev Ranks + Audio Controls
+**What changed:** Complete gamification rewrite. Dev-themed ranks (Script Kiddie → Machine Whisperer). Metin2 grind curve (300*n^3). XP heavily nerfed (tokens 100x nerf). New XP sources: project count, code deletion, subagent spawns. Dev-themed achievements. Start muted by default. Mute checkbox + volume slider. Window height 560→640. Hot-patching via asar extract instead of reinstalling.
+**Why:** User was level 44 after one week — way too fast. Wanted developer-themed naming and grindier progression.
+**Impact:** Level dropped from 44 to ~8. Senior Dev now takes 4 months instead of 1 week. Dev naming throughout.
+**Decision context:** User referenced Metin2 (Korean MMO known for brutal leveling). "A week is nothing bruv."
+
+## 2026-04-05 — Electron Lessons Learned (13 items)
+**What changed:** Added comprehensive "Electron App Lessons" section to design_principles.md covering: preload.js in files list, executables in extraResources, artifact naming with dashes, private repo blocking, quitAndInstall flags, isQuitting pattern, gh upload verification, PATH resolution, stdin piping, data folder strategy, contextIsolation, hot-patching via asar extract, Windows exec gotchas. Plus release checklist.
+**Why:** Every one of these was a bug encountered and fixed during Claude HUD and PFA Contabilitate development.
+**Impact:** Future Electron apps won't repeat these mistakes.
+**Decision context:** User said "Write those down so you won't make the same mistakes."
+
+## 2026-04-05 — pocketDEV: Electron release pipeline + auto-updater check
+**What changed:** Added `release` subcommand that automates: version bump → build → commit → push → GitHub Release → upload with verification + retry. Added audit check that flags Electron apps missing electron-updater. Fixed upload verification (was checking wrong filename). Fixed large file upload (separate from gh release create).
+**Why:** Manual release process was error-prone. User wanted one-command releases.
+**Impact:** `python pocketdev.py release "UsageBOT" --bump patch` does everything. Auto-updater delivers to users.
+
 ## 2026-04-04 — Transcriptor v2: Test suite (98 tests)
 **What changed:** Created 5 test files covering 6 source modules: config loading (20 tests), process_v2 dispatch/retry/paths (34 tests), document processor (11 tests), processing calculator (21 tests), quiet mode (12 tests). All GPU/whisper dependencies fully mocked.
 **Why:** Most complex tool in portfolio had zero tests. GPU retry, multi-threading, file dispatch, and diarization recovery were all untested.

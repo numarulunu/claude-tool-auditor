@@ -1,5 +1,24 @@
 # pocketDEV Improvement Backlog
-Last updated: 2026-04-04
+Last updated: 2026-04-05
+
+## Finance — MAJOR: Autonomous Accountant (next project)
+
+### [NEW] Design and build autonomous PFA accountant agent
+**Impact:** Critical — this is the user's #1 priority project
+**Effort:** Large project (multi-phase, weeks)
+**What:** Transform PFA Contabilitate from a one-shot calculator into an autonomous accounting agent that:
+1. **Auto-processes documents:** Watches for new invoices/statements, processes them without prompting
+2. **Cross-references legislation:** Every calculation verified against the ANAF legislation database in real-time, not just as a post-hoc check
+3. **Generates declarations:** D212, D301, D390 ready to submit, auto-filled from calculation data
+4. **Tracks strategy implementation:** Monitors which tax strategies (Pilon III, health insurance, ETF) are actually done vs just planned
+5. **Handles law changes correctly:** Amortization threshold 2500→5000 applies only to 2026+ purchases, not retroactively. Engine must track purchase dates and apply correct thresholds per era.
+6. **Organizes documents:** By fiscal year, category, deadline. Auto-categorizes imported files.
+7. **Deadline alerts:** D212 due May 25, bonificatie April 15, quarterly estimates, etc.
+8. **Claude agents in the backend:** Not just a frontend with a verify button. Agents that move data, fix errors, restructure files, and generate outputs.
+**Why:** User quote: "I want it 100x better than an average accountant and 1000x faster. A pocket accountant which is much smarter and efficient." Current tool just crunches numbers. The vision is an autonomous system that handles everything.
+**Key constraint:** Must be accurate to Romanian law. The legislation database exists (ANAF downloads, Cod Fiscal articles, OUG summaries). Claude must reference specific articles, not hallucinate rules.
+**Current state:** Verification feature works (Claude reads results + law, finds errors, suggests strategies). Found real error in first run (amortization threshold). 13 unused strategies worth ~12,900 RON/year identified.
+**Added:** 2026-04-05
 
 ## Transcriptor v2
 
