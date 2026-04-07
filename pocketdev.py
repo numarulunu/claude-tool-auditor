@@ -757,6 +757,22 @@ def scan_history(repo_dir):
     return issues
 
 
+def _missing_binary(stderr: str) -> bool:
+    """Detect cases where the test runner binary itself wasn't found.
+    These should be reported as 'not run' (environment issue), not as test FAILURES.
+    """
+    if not stderr:
+        return False
+    s = stderr.lower()
+    return (
+        "winerror 2" in s
+        or "cannot find the file" in s
+        or "command not found" in s
+        or "no such file or directory" in s
+        or "is not recognized as an internal" in s
+    )
+
+
 def run_tests(d, tests_info):
     """Actually execute the test suite and return result."""
     if not tests_info["has_tests"]:
@@ -768,28 +784,39 @@ def run_tests(d, tests_info):
             cwd=str(d), timeout=120
         )
         output = (stdout + "\n" + stderr).strip()
+        if _missing_binary(stderr):
+            return {"ran": False, "passed": None, "output": f"runner unavailable: {stderr[:200]}"}
+        # pytest exit code 5 = "no tests collected" — environment issue, not a failure
+        if code == 5:
+            return {"ran": False, "passed": None, "output": "no tests collected"}
         return {"ran": True, "passed": code == 0, "output": output[-500:]}
 
     elif tests_info["framework"] == "vitest":
-        # Vitest: use --run to run once and exit (not --watchAll which is Jest-only)
         import shutil
-        npx_cmd = shutil.which("npx") or "npx"
+        npx_cmd = shutil.which("npx")
+        if not npx_cmd:
+            return {"ran": False, "passed": None, "output": "npx not on PATH"}
         code, stdout, stderr = run_cmd(
             [npx_cmd, "vitest", "run"],
             cwd=str(d), timeout=120
         )
         output = (stdout + "\n" + stderr).strip()
+        if _missing_binary(stderr):
+            return {"ran": False, "passed": None, "output": f"runner unavailable: {stderr[:200]}"}
         return {"ran": True, "passed": code == 0, "output": output[-500:]}
 
     elif tests_info["framework"] == "npm test":
-        # Jest/generic: use --watchAll=false to run once
         import shutil
-        npm_cmd = shutil.which("npm") or "npm"
+        npm_cmd = shutil.which("npm")
+        if not npm_cmd:
+            return {"ran": False, "passed": None, "output": "npm not on PATH"}
         code, stdout, stderr = run_cmd(
             [npm_cmd, "test", "--", "--watchAll=false"],
             cwd=str(d), timeout=120
         )
         output = (stdout + "\n" + stderr).strip()
+        if _missing_binary(stderr):
+            return {"ran": False, "passed": None, "output": f"runner unavailable: {stderr[:200]}"}
         return {"ran": True, "passed": code == 0, "output": output[-500:]}
 
     return {"ran": False, "passed": None, "output": None}
